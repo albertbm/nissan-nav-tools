@@ -74,14 +74,16 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev wayland-protocols
       - run: go vet ./...
       - run: go test ./...
-      - name: Build
-        run: go build -o nissan-nav-tools ./cmd/nissan-nav-tools
-      - name: Archive
-        run: tar -czf nissan-nav-tools-linux-amd64.tar.gz nissan-nav-tools
+      - run: go install fyne.io/tools/cmd/fyne@latest
+      - name: Package
+        working-directory: cmd/nissan-nav-tools
+        run: |
+          fyne package -os linux
+          mv "Nissan Nav Tools.tar.xz" ../../nissan-nav-tools-linux-amd64.tar.xz
       - uses: actions/upload-artifact@v7
         with:
           name: nissan-nav-tools-linux-amd64
-          path: nissan-nav-tools-linux-amd64.tar.gz
+          path: nissan-nav-tools-linux-amd64.tar.xz
 
   release:
     needs: [macos, windows, linux]
@@ -96,7 +98,7 @@ jobs:
       - name: Flatten artifacts
         run: |
           mkdir -p dist
-          find artifacts -type f \( -name '*.zip' -o -name '*.tar.gz' \) -exec cp {} dist/ \;
+          find artifacts -type f \( -name '*.zip' -o -name '*.tar.xz' \) -exec cp {} dist/ \;
           ls -la dist
       - name: Create release
         uses: softprops/action-gh-release@v3
