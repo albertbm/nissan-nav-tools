@@ -8,13 +8,12 @@ import (
 	"runtime"
 )
 
-// Copy writes dst as a copy of src. On macOS it tries an APFS clonefile via
-// "cp -c", which shares blocks with src until either copy is written to;
-// everywhere else, and if that fails, it falls back to a plain byte copy.
+// Copy tries an APFS clone on macOS and falls back to a plain byte copy.
 func Copy(src, dst string) error {
 	if runtime.GOOS == "darwin" {
 		if err := exec.Command("cp", "-c", src, dst).Run(); err == nil {
-			return nil
+			// A clone keeps src's mode; a read-only original would leave dst unwritable.
+			return os.Chmod(dst, 0o644)
 		}
 	}
 	return plainCopy(src, dst)
