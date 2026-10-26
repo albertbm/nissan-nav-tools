@@ -1,10 +1,11 @@
 package disk
 
 import (
+	"io"
 	"os"
-	"path/filepath"
-	"strings"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
 
 // Captured from `diskutil list -plist external physical | plutil -convert json -o - -`
@@ -76,37 +77,94 @@ func TestParseWholeDisksRejectsGarbage(t *testing.T) {
 	}
 }
 
-func TestDDWriteScriptArgs(t *testing.T) {
-	d := Info{Identifier: "disk5"}
-	script := ddWriteScript("/tmp/card.img", d.Node(), "/tmp/progress")
-	for _, want := range []string{"if='/tmp/card.img'", "of='/dev/rdisk5'", "bs=16m"} {
-		if !strings.Contains(script, want) {
-			t.Errorf("script missing %q:\n%s", want, script)
+func TestPadToSectorLeavesAlignedDataAlone(t *testing.T) {
+	buf := make([]byte, sectorBytes*3)
+	if got := padToSector(buf); len(got) != len(buf) {
+		t.Errorf("padded an already-aligned chunk to %d bytes, want %d", len(got), len(buf))
+	}
+}
+
+func TestPadToSectorRoundsUpTheShortChunk(t *testing.T) {
+	buf := []byte("short")
+	got := padToSector(buf)
+	if len(got) != sectorBytes {
+		t.Fatalf("got %d bytes, want %d", len(got), sectorBytes)
+	}
+	if string(got[:len(buf)]) != "short" {
+		t.Error("padding clobbered the original data")
+	}
+	for _, b := range got[len(buf):] {
+		if b != 0 {
+			t.Error("padding was not zero-filled")
 		}
 	}
 }
 
-func TestLastDDWrittenParsesSIGINFOOutput(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "progress")
-	log := "12+0 records in\n12+0 records out\n201326592 bytes transferred in 3.1 secs (64942449 bytes/sec)\n"
-	if err := os.WriteFile(path, []byte(log), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	n, ok := lastDDWritten(path)
-	if !ok || n != 201326592 {
-		t.Errorf("got %d, %v, want 201326592, true", n, ok)
+func TestWriteRangesRejectsAnUnalignedOffset(t *testing.T) {
+	d := Info{Identifier: "disk99", Removable: true}
+	err := WriteRanges(d, []Range{{Offset: 1, Data: make([]byte, sectorBytes)}})
+	if err == nil {
+		t.Fatal("expected an alignment error")
 	}
 }
 
-func TestLastDDWrittenNoDataYet(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "progress")
-	if err := os.WriteFile(path, nil, 0o644); err != nil {
+func TestWriteRangesRejectsAnUnalignedLength(t *testing.T) {
+	d := Info{Identifier: "disk99", Removable: true}
+	err := WriteRanges(d, []Range{{Offset: 0, Data: make([]byte, sectorBytes-1)}})
+	if err == nil {
+		t.Fatal("expected an alignment error")
+	}
+}
+
+func TestReadRangesRejectsAnUnalignedOffset(t *testing.T) {
+	d := Info{Identifier: "disk99", Removable: true}
+	_, err := ReadRanges(d, []Range{{Offset: 1, Data: make([]byte, sectorBytes)}})
+	if err == nil {
+		t.Fatal("expected an alignment error")
+	}
+}
+
+func TestRecvFDReceivesThePassedDescriptor(t *testing.T) {
+	want := []byte("stands in for a card's raw device fd")
+	tmp, err := os.CreateTemp(t.TempDir(), "fd-pass-*")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := lastDDWritten(path); ok {
-		t.Error("reported progress before dd printed any")
+	if _, err := tmp.Write(want); err != nil {
+		t.Fatal(err)
+	}
+	tmp.Close()
+
+	passed, err := os.Open(tmp.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer passed.Close()
+
+	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatalf("socketpair: %v", err)
+	}
+	defer unix.Close(fds[0])
+	defer unix.Close(fds[1])
+
+	rights := unix.UnixRights(int(passed.Fd()))
+	if err := unix.Sendmsg(fds[1], []byte("x"), rights, nil, 0); err != nil {
+		t.Fatalf("sendmsg: %v", err)
+	}
+
+	got, err := recvFD(fds[0], "received")
+	if err != nil {
+		t.Fatalf("recvFD: %v", err)
+	}
+	defer got.Close()
+
+	data, err := io.ReadAll(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != string(want) {
+		t.Errorf("got %q, want %q", data, want)
 	}
 }
 

@@ -3,17 +3,16 @@ package disk
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
-	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // Info is one whole disk diskutil reported as external and physical.
@@ -26,6 +25,9 @@ type Info struct {
 }
 
 const sectorBytes = 512
+
+// A multiple of sectorBytes: only the final, short chunk of a device write ever needs padding.
+const chunkSize = 4 << 20
 
 type Range struct {
 	Offset int64
@@ -149,93 +151,6 @@ func Unmount(id string) error {
 	return nil
 }
 
-// ReadHeader reads the raw device's first two sectors, all a trim size needs.
-func ReadHeader(id Info) ([]byte, error) {
-	if runtime.GOOS != "darwin" {
-		return nil, errUnsupported
-	}
-	if id.Internal {
-		return nil, fmt.Errorf("refusing to read %s: it is an internal disk", id.Identifier)
-	}
-	script := fmt.Sprintf(
-		`do shell script "/bin/dd if=%s bs=512 count=2 2>/dev/null | /usr/bin/base64" with administrator privileges`,
-		appleScriptQuote(id.Node()))
-	out, err := exec.Command("osascript", "-e", script).Output()
-	if err != nil {
-		return nil, fmt.Errorf("reading the partition table: %w", err)
-	}
-	data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(out)))
-	if err != nil {
-		return nil, fmt.Errorf("decoding the partition table: %w", err)
-	}
-	if len(data) < 1024 {
-		return nil, fmt.Errorf("got %d bytes off the device, want 1024", len(data))
-	}
-	return data, nil
-}
-
-// bestBlockSize picks the largest block size that divides n evenly, so a
-// size-limited read still moves in big chunks.
-func bestBlockSize(n int64) int64 {
-	for _, bs := range []int64{16 << 20, 1 << 20, 64 << 10, 4096, 512} {
-		if n%bs == 0 {
-			return bs
-		}
-	}
-	return 512
-}
-
-// ReadRaw copies id's raw device to outPath with one privileged, read-only
-// dd. maxBytes, if positive, stops the copy early. onProgress, if set, is
-// polled off outPath's growing size from another goroutine.
-func ReadRaw(id Info, outPath string, maxBytes int64, onProgress func(written int64)) error {
-	if runtime.GOOS != "darwin" {
-		return errUnsupported
-	}
-	if id.Internal {
-		return fmt.Errorf("refusing to read %s: it is an internal disk", id.Identifier)
-	}
-
-	ddArgs := "bs=16m"
-	if maxBytes > 0 {
-		bs := bestBlockSize(maxBytes)
-		ddArgs = fmt.Sprintf("bs=%d count=%d", bs, maxBytes/bs)
-	}
-	script := fmt.Sprintf(
-		`do shell script "/bin/dd if=%s of=%s %s" with administrator privileges`,
-		appleScriptQuote(id.Node()), appleScriptQuote(outPath), ddArgs)
-	cmd := exec.Command("osascript", "-e", script)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("starting the privileged read: %w", err)
-	}
-
-	stop := make(chan struct{})
-	if onProgress != nil {
-		go func() {
-			t := time.NewTicker(500 * time.Millisecond)
-			defer t.Stop()
-			for {
-				select {
-				case <-t.C:
-					if fi, err := os.Stat(outPath); err == nil {
-						onProgress(fi.Size())
-					}
-				case <-stop:
-					return
-				}
-			}
-		}()
-	}
-	err := cmd.Wait()
-	close(stop)
-	if err != nil {
-		return fmt.Errorf("dd: %w: %s", err, strings.TrimSpace(stderr.String()))
-	}
-	return nil
-}
-
 func Eject(id string) error {
 	if runtime.GOOS != "darwin" {
 		return errUnsupported
@@ -247,208 +162,220 @@ func Eject(id string) error {
 	return nil
 }
 
-// dd's SIGINFO output goes to progressPath so the unprivileged app can read progress.
-func ddWriteScript(srcPath, node, progressPath string) string {
-	return fmt.Sprintf(`set -e
-/bin/dd if=%s of=%s bs=16m 2>>%s &
-pid=$!
-while kill -0 "$pid" 2>/dev/null; do
-  sleep 1
-  kill -INFO "$pid" 2>/dev/null || true
-done
-wait "$pid"
-`, appleScriptQuote(srcPath), appleScriptQuote(node), appleScriptQuote(progressPath))
-}
-
-var ddBytesRe = regexp.MustCompile(`(\d+) bytes transferred`)
-
-func lastDDWritten(progressPath string) (int64, bool) {
-	data, err := os.ReadFile(progressPath)
-	if err != nil {
-		return 0, false
-	}
-	matches := ddBytesRe.FindAllSubmatch(data, -1)
-	if len(matches) == 0 {
-		return 0, false
-	}
-	n, err := strconv.ParseInt(string(matches[len(matches)-1][1]), 10, 64)
-	if err != nil {
-		return 0, false
-	}
-	return n, true
-}
-
-// WriteRaw writes srcPath onto id's raw device in one privileged step. Only
-// srcPath's own bytes are written; whatever lies past it on the card is
-// untouched. onProgress, if set, is polled from SIGINFO's output.
-func WriteRaw(id Info, srcPath string, onProgress func(written int64)) error {
-	if runtime.GOOS != "darwin" {
-		return errUnsupported
-	}
-	if err := refuseUnlessCard(id); err != nil {
-		return err
-	}
-
-	dir, err := os.MkdirTemp("", "nnt-restore-*")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(dir)
-	progressPath := filepath.Join(dir, "progress")
-	if err := os.WriteFile(progressPath, nil, 0o666); err != nil {
-		return err
-	}
-	scriptPath := filepath.Join(dir, "write.sh")
-	if err := os.WriteFile(scriptPath, []byte(ddWriteScript(srcPath, id.Node(), progressPath)), 0o700); err != nil {
-		return err
-	}
-
-	ascript := fmt.Sprintf(`do shell script "/bin/bash %s" with administrator privileges`, appleScriptQuote(scriptPath))
-	cmd := exec.Command("osascript", "-e", ascript)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("starting the privileged write: %w", err)
-	}
-
-	stop := make(chan struct{})
-	if onProgress != nil {
-		go func() {
-			t := time.NewTicker(500 * time.Millisecond)
-			defer t.Stop()
-			for {
-				select {
-				case <-t.C:
-					if n, ok := lastDDWritten(progressPath); ok {
-						onProgress(n)
-					}
-				case <-stop:
-					return
-				}
-			}
-		}()
-	}
-	err = cmd.Wait()
-	close(stop)
-	if err != nil {
-		return fmt.Errorf("dd: %w: %s", err, strings.TrimSpace(stderr.String()))
-	}
-	return nil
-}
-
-// appleScriptQuote applies the shell's own quoting, then escapes that again for AppleScript's string literal.
-func appleScriptQuote(s string) string {
-	shq := "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-	return strings.ReplaceAll(strings.ReplaceAll(shq, `\`, `\\`), `"`, `\"`)
-}
-
-// WriteRanges writes to id's raw device in one privileged step, via one admin-authorized script.
-func WriteRanges(id Info, ranges []Range) error {
-	if runtime.GOOS != "darwin" {
-		return errUnsupported
-	}
-	if err := refuseUnlessCard(id); err != nil {
-		return err
-	}
-	if len(ranges) == 0 {
-		return nil
-	}
-
-	dir, err := os.MkdirTemp("", "nnt-patch-*")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(dir)
-
-	dataPath := filepath.Join(dir, "data.bin")
-	df, err := os.Create(dataPath)
-	if err != nil {
-		return err
-	}
-	var script strings.Builder
-	script.WriteString("set -e\n")
-	var tmpOff int64
-	for _, r := range ranges {
-		if r.Offset%sectorBytes != 0 || int64(len(r.Data))%sectorBytes != 0 {
-			df.Close()
-			return fmt.Errorf("range at 0x%x, %d bytes, is not sector-aligned", r.Offset, len(r.Data))
-		}
-		if _, err := df.Write(r.Data); err != nil {
-			df.Close()
-			return err
-		}
-		fmt.Fprintf(&script, "/bin/dd if=%s of=%s bs=%d skip=%d seek=%d count=%d conv=notrunc\n",
-			dataPath, id.Node(), sectorBytes, tmpOff/sectorBytes, r.Offset/sectorBytes, int64(len(r.Data))/sectorBytes)
-		tmpOff += int64(len(r.Data))
-	}
-	if err := df.Close(); err != nil {
-		return err
-	}
-	scriptPath := filepath.Join(dir, "write.sh")
-	if err := os.WriteFile(scriptPath, []byte(script.String()), 0o700); err != nil {
-		return err
-	}
-
-	ascript := fmt.Sprintf(`do shell script "/bin/bash %s" with administrator privileges`, appleScriptQuote(scriptPath))
-	out, err := exec.Command("osascript", "-e", ascript).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("writing the card: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
-}
-
-// ReadRanges reads the same ranges back in one privileged step, for comparison.
-func ReadRanges(id Info, ranges []Range) ([][]byte, error) {
+// OpenRaw goes through authopen, so Touch ID or a watch can clear the prompt instead of a typed password; no root shell ever touches the file.
+func OpenRaw(id Info, write bool) (*os.File, error) {
 	if runtime.GOOS != "darwin" {
 		return nil, errUnsupported
 	}
 	if err := refuseUnlessCard(id); err != nil {
 		return nil, err
 	}
+
+	args := []string{"-stdoutpipe"}
+	if write {
+		args = append(args, "-o", strconv.Itoa(os.O_RDWR))
+	}
+	args = append(args, id.Node())
+
+	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)
+	if err != nil {
+		return nil, fmt.Errorf("socketpair: %w", err)
+	}
+	defer unix.Close(fds[0])
+	childEnd := os.NewFile(uintptr(fds[1]), "authopen-stdout")
+
+	cmd := exec.Command("/usr/libexec/authopen", args...)
+	cmd.Stdout = childEnd
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	startErr := cmd.Start()
+	childEnd.Close()
+	if startErr != nil {
+		return nil, fmt.Errorf("starting authopen: %w", startErr)
+	}
+
+	f, recvErr := recvFD(fds[0], id.Node())
+	waitErr := cmd.Wait()
+
+	if recvErr != nil || f == nil {
+		detail := strings.TrimSpace(stderr.String())
+		switch {
+		case waitErr != nil && detail != "":
+			return nil, fmt.Errorf("authopen on %s: %w: %s", id.Node(), waitErr, detail)
+		case waitErr != nil:
+			return nil, fmt.Errorf("authopen on %s: %w (denied, cancelled, or this app needs Full Disk Access)", id.Node(), waitErr)
+		default:
+			return nil, fmt.Errorf("authopen on %s gave no file descriptor; check Full Disk Access for this app", id.Node())
+		}
+	}
+	return f, nil
+}
+
+func recvFD(sock int, name string) (*os.File, error) {
+	buf := make([]byte, 4)
+	oob := make([]byte, unix.CmsgSpace(4))
+	_, oobn, _, _, err := unix.Recvmsg(sock, buf, oob, 0)
+	if err != nil {
+		return nil, fmt.Errorf("receiving the file descriptor: %w", err)
+	}
+	if oobn == 0 {
+		return nil, fmt.Errorf("authopen passed no file descriptor")
+	}
+	scms, err := unix.ParseSocketControlMessage(oob[:oobn])
+	if err != nil {
+		return nil, fmt.Errorf("parsing the control message: %w", err)
+	}
+	if len(scms) == 0 {
+		return nil, fmt.Errorf("authopen's message carried no control data")
+	}
+	rights, err := unix.ParseUnixRights(&scms[0])
+	if err != nil {
+		return nil, fmt.Errorf("parsing the passed rights: %w", err)
+	}
+	if len(rights) == 0 {
+		return nil, fmt.Errorf("authopen passed no rights")
+	}
+	return os.NewFile(uintptr(rights[0]), name), nil
+}
+
+func padToSector(buf []byte) []byte {
+	r := len(buf) % sectorBytes
+	if r == 0 {
+		return buf
+	}
+	padded := make([]byte, len(buf)+sectorBytes-r)
+	copy(padded, buf)
+	return padded
+}
+
+func copyChunks(dst io.Writer, src io.Reader, onProgress func(int64), padWrites bool) error {
+	buf := make([]byte, chunkSize)
+	var total int64
+	for {
+		n, err := io.ReadFull(src, buf)
+		if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+			return fmt.Errorf("reading: %w", err)
+		}
+		if n > 0 {
+			chunk := buf[:n]
+			if padWrites {
+				chunk = padToSector(chunk)
+			}
+			if _, werr := dst.Write(chunk); werr != nil {
+				return fmt.Errorf("writing: %w", werr)
+			}
+			total += int64(n)
+			if onProgress != nil {
+				onProgress(total)
+			}
+		}
+		if err == io.ErrUnexpectedEOF || err == io.EOF {
+			return nil
+		}
+	}
+}
+
+func ReadHeader(id Info) ([]byte, error) {
+	f, err := OpenRaw(id, false)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data := make([]byte, 1024)
+	if _, err := io.ReadFull(f, data); err != nil {
+		return nil, fmt.Errorf("reading the partition table: %w", err)
+	}
+	return data, nil
+}
+
+func ReadRaw(id Info, outPath string, maxBytes int64, onProgress func(written int64)) error {
+	src, err := OpenRaw(id, false)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	out, err := os.Create(outPath)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	var r io.Reader = src
+	if maxBytes > 0 {
+		r = io.LimitReader(src, maxBytes)
+	}
+	return copyChunks(out, r, onProgress, false)
+}
+
+func WriteRaw(id Info, srcPath string, onProgress func(written int64)) error {
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	dst, err := OpenRaw(id, true)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+
+	return copyChunks(dst, src, onProgress, true)
+}
+
+func checkRangesAligned(ranges []Range) error {
+	for _, r := range ranges {
+		if r.Offset%sectorBytes != 0 || int64(len(r.Data))%sectorBytes != 0 {
+			return fmt.Errorf("range at 0x%x, %d bytes, is not sector-aligned", r.Offset, len(r.Data))
+		}
+	}
+	return nil
+}
+
+func WriteRanges(id Info, ranges []Range) error {
+	if len(ranges) == 0 {
+		return nil
+	}
+	if err := checkRangesAligned(ranges); err != nil {
+		return err
+	}
+
+	f, err := OpenRaw(id, true)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	for _, r := range ranges {
+		if _, err := f.WriteAt(r.Data, r.Offset); err != nil {
+			return fmt.Errorf("writing the card at 0x%x: %w", r.Offset, err)
+		}
+	}
+	return nil
+}
+
+func ReadRanges(id Info, ranges []Range) ([][]byte, error) {
 	if len(ranges) == 0 {
 		return nil, nil
 	}
-
-	dir, err := os.MkdirTemp("", "nnt-readback-*")
-	if err != nil {
-		return nil, err
-	}
-	defer os.RemoveAll(dir)
-	outPath := filepath.Join(dir, "readback.bin")
-
-	var script strings.Builder
-	script.WriteString("set -e\n")
-	for _, r := range ranges {
-		if r.Offset%sectorBytes != 0 || int64(len(r.Data))%sectorBytes != 0 {
-			return nil, fmt.Errorf("range at 0x%x, %d bytes, is not sector-aligned", r.Offset, len(r.Data))
-		}
-		fmt.Fprintf(&script, "/bin/dd if=%s bs=%d skip=%d count=%d >> %s\n",
-			id.Node(), sectorBytes, r.Offset/sectorBytes, int64(len(r.Data))/sectorBytes, outPath)
-	}
-	scriptPath := filepath.Join(dir, "read.sh")
-	if err := os.WriteFile(scriptPath, []byte(script.String()), 0o700); err != nil {
+	if err := checkRangesAligned(ranges); err != nil {
 		return nil, err
 	}
 
-	ascript := fmt.Sprintf(`do shell script "/bin/bash %s" with administrator privileges`, appleScriptQuote(scriptPath))
-	out, err := exec.Command("osascript", "-e", ascript).CombinedOutput()
+	f, err := OpenRaw(id, false)
 	if err != nil {
-		return nil, fmt.Errorf("reading the card back: %w: %s", err, strings.TrimSpace(string(out)))
+		return nil, err
 	}
+	defer f.Close()
 
-	got, err := os.ReadFile(outPath)
-	if err != nil {
-		return nil, fmt.Errorf("reading the read-back file: %w", err)
-	}
 	result := make([][]byte, len(ranges))
-	var pos int
 	for i, r := range ranges {
-		n := len(r.Data)
-		if pos+n > len(got) {
-			return nil, fmt.Errorf("read-back is short: got %d bytes, wanted at least %d", len(got), pos+n)
+		buf := make([]byte, len(r.Data))
+		if _, err := f.ReadAt(buf, r.Offset); err != nil {
+			return nil, fmt.Errorf("reading the card back at 0x%x: %w", r.Offset, err)
 		}
-		result[i] = got[pos : pos+n]
-		pos += n
+		result[i] = buf
 	}
 	return result, nil
 }

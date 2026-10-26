@@ -253,11 +253,15 @@ func planCardPatch(scratchPath string, selected []int, log func(string)) ([]disk
 	return ranges, nil
 }
 
-// applyCardPatch writes in one privileged step, then reads back to confirm.
+// Unmounts again right before writing: the card could have remounted while the confirmation dialog was up.
 func applyCardPatch(d disk.Info, ranges []disk.Range, log func(string)) error {
 	var total int64
 	for _, r := range ranges {
 		total += int64(len(r.Data))
+	}
+	log(fmt.Sprintf("Unmounting %s...", d.Identifier))
+	if err := disk.Unmount(d.Identifier); err != nil {
+		return fmt.Errorf("unmount: %w", err)
 	}
 	log(fmt.Sprintf("Writing %d page range(s), %s, to %s...", len(ranges), humansize.Format(total), d.Node()))
 	if err := disk.WriteRanges(d, ranges); err != nil {
