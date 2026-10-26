@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -19,6 +20,14 @@ type Info struct {
 	Name       string // diskutil's MediaName, blank if it didn't give one
 	Size       int64
 	Internal   bool
+	Removable  bool // diskutil's RemovableMedia; false for most external enclosures, true for a card reader's slot
+}
+
+const sectorBytes = 512
+
+type Range struct {
+	Offset int64
+	Data   []byte
 }
 
 // Node is the raw character device to read the disk through on macOS.
@@ -97,6 +106,7 @@ func parseInfo(js []byte) (Info, error) {
 		MediaName        string `json:"MediaName"`
 		Size             int64  `json:"Size"`
 		Internal         bool   `json:"Internal"`
+		RemovableMedia   bool   `json:"RemovableMedia"`
 	}
 	if err := json.Unmarshal(js, &v); err != nil {
 		return Info{}, fmt.Errorf("parsing diskutil info output: %w", err)
@@ -104,7 +114,18 @@ func parseInfo(js []byte) (Info, error) {
 	if v.DeviceIdentifier == "" {
 		return Info{}, fmt.Errorf("diskutil info did not name a device")
 	}
-	return Info{Identifier: v.DeviceIdentifier, Name: v.MediaName, Size: v.Size, Internal: v.Internal}, nil
+	return Info{Identifier: v.DeviceIdentifier, Name: v.MediaName, Size: v.Size, Internal: v.Internal, Removable: v.RemovableMedia}, nil
+}
+
+// refuseUnlessCard rejects any disk that is not external and removable.
+func refuseUnlessCard(id Info) error {
+	if id.Internal {
+		return fmt.Errorf("refusing %s: it is an internal disk", id.Identifier)
+	}
+	if !id.Removable {
+		return fmt.Errorf("refusing %s: it is not removable media", id.Identifier)
+	}
+	return nil
 }
 
 // Unmount clears the buffer cache so nothing else writes under a raw read.
@@ -210,4 +231,115 @@ func ReadRaw(id Info, outPath string, maxBytes int64, onProgress func(written in
 func appleScriptQuote(s string) string {
 	shq := "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 	return strings.ReplaceAll(strings.ReplaceAll(shq, `\`, `\\`), `"`, `\"`)
+}
+
+// WriteRanges writes to id's raw device in one privileged step, via one admin-authorized script.
+func WriteRanges(id Info, ranges []Range) error {
+	if runtime.GOOS != "darwin" {
+		return errUnsupported
+	}
+	if err := refuseUnlessCard(id); err != nil {
+		return err
+	}
+	if len(ranges) == 0 {
+		return nil
+	}
+
+	dir, err := os.MkdirTemp("", "nnt-patch-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+
+	dataPath := filepath.Join(dir, "data.bin")
+	df, err := os.Create(dataPath)
+	if err != nil {
+		return err
+	}
+	var script strings.Builder
+	script.WriteString("set -e\n")
+	var tmpOff int64
+	for _, r := range ranges {
+		if r.Offset%sectorBytes != 0 || int64(len(r.Data))%sectorBytes != 0 {
+			df.Close()
+			return fmt.Errorf("range at 0x%x, %d bytes, is not sector-aligned", r.Offset, len(r.Data))
+		}
+		if _, err := df.Write(r.Data); err != nil {
+			df.Close()
+			return err
+		}
+		fmt.Fprintf(&script, "/bin/dd if=%s of=%s bs=%d skip=%d seek=%d count=%d conv=notrunc\n",
+			dataPath, id.Node(), sectorBytes, tmpOff/sectorBytes, r.Offset/sectorBytes, int64(len(r.Data))/sectorBytes)
+		tmpOff += int64(len(r.Data))
+	}
+	if err := df.Close(); err != nil {
+		return err
+	}
+	scriptPath := filepath.Join(dir, "write.sh")
+	if err := os.WriteFile(scriptPath, []byte(script.String()), 0o700); err != nil {
+		return err
+	}
+
+	ascript := fmt.Sprintf(`do shell script "/bin/bash %s" with administrator privileges`, appleScriptQuote(scriptPath))
+	out, err := exec.Command("osascript", "-e", ascript).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("writing the card: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// ReadRanges reads the same ranges back in one privileged step, for comparison.
+func ReadRanges(id Info, ranges []Range) ([][]byte, error) {
+	if runtime.GOOS != "darwin" {
+		return nil, errUnsupported
+	}
+	if err := refuseUnlessCard(id); err != nil {
+		return nil, err
+	}
+	if len(ranges) == 0 {
+		return nil, nil
+	}
+
+	dir, err := os.MkdirTemp("", "nnt-readback-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	outPath := filepath.Join(dir, "readback.bin")
+
+	var script strings.Builder
+	script.WriteString("set -e\n")
+	for _, r := range ranges {
+		if r.Offset%sectorBytes != 0 || int64(len(r.Data))%sectorBytes != 0 {
+			return nil, fmt.Errorf("range at 0x%x, %d bytes, is not sector-aligned", r.Offset, len(r.Data))
+		}
+		fmt.Fprintf(&script, "/bin/dd if=%s bs=%d skip=%d count=%d >> %s\n",
+			id.Node(), sectorBytes, r.Offset/sectorBytes, int64(len(r.Data))/sectorBytes, outPath)
+	}
+	scriptPath := filepath.Join(dir, "read.sh")
+	if err := os.WriteFile(scriptPath, []byte(script.String()), 0o700); err != nil {
+		return nil, err
+	}
+
+	ascript := fmt.Sprintf(`do shell script "/bin/bash %s" with administrator privileges`, appleScriptQuote(scriptPath))
+	out, err := exec.Command("osascript", "-e", ascript).CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("reading the card back: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+
+	got, err := os.ReadFile(outPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading the read-back file: %w", err)
+	}
+	result := make([][]byte, len(ranges))
+	var pos int
+	for i, r := range ranges {
+		n := len(r.Data)
+		if pos+n > len(got) {
+			return nil, fmt.Errorf("read-back is short: got %d bytes, wanted at least %d", len(got), pos+n)
+		}
+		result[i] = got[pos : pos+n]
+		pos += n
+	}
+	return result, nil
 }

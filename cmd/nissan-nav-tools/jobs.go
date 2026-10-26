@@ -20,6 +20,7 @@ import (
 type patchRow struct {
 	title string
 	apply func(f consent.ReadWriterAt, size int64, log func(string)) (string, error)
+	plan  func(f io.ReaderAt, size int64, log func(string)) (consent.Result, []consent.PageWrite, error)
 }
 
 var patchRows = []patchRow{
@@ -33,6 +34,7 @@ var patchRows = []patchRow{
 			return fmt.Sprintf("build %s, chunk %d: %d -> %d bytes, %d pages written",
 				res.Target.Build, res.Chunk, res.Stock, res.Packed, res.Pages), nil
 		},
+		plan: consent.PlanConsentSkip,
 	},
 }
 
@@ -162,6 +164,116 @@ func logHash(path string, want bool, log func(string)) error {
 		return err
 	}
 	log("SHA-256: " + hex.EncodeToString(h.Sum(nil)))
+	return nil
+}
+
+func patchInPlaceFile(path string, selected []int, log func(string)) error {
+	f, err := os.OpenFile(path, os.O_RDWR, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	size, err := fileSize(f)
+	if err != nil {
+		return err
+	}
+	for _, i := range selected {
+		row := patchRows[i]
+		log("Applying: " + row.title)
+		summary, err := row.apply(f, size, log)
+		if err != nil {
+			return fmt.Errorf("%s: %w", row.title, err)
+		}
+		log(summary)
+	}
+	return nil
+}
+
+func backupCopy(src, dst string, log func(string)) error {
+	log(fmt.Sprintf("Backing up to %s...", dst))
+	if _, err := os.Stat(dst); err == nil {
+		if err := os.Remove(dst); err != nil {
+			return err
+		}
+	}
+	if err := clone.Copy(src, dst); err != nil {
+		return fmt.Errorf("copying %s to %s: %w", src, dst, err)
+	}
+	log("Backup written.")
+	return nil
+}
+
+// refuseUnlessCard rejects any disk that is not external and removable.
+func refuseUnlessCard(d disk.Info) error {
+	if d.Internal {
+		return fmt.Errorf("%s is an internal disk; refusing to patch it", d.Identifier)
+	}
+	if !d.Removable {
+		return fmt.Errorf("%s is not removable media; refusing to patch it", d.Identifier)
+	}
+	return nil
+}
+
+func readCardToScratch(d disk.Info, scratch string, onProgress func(int64), log func(string)) (int64, error) {
+	return backupJob(d, scratch, trimTarget(d, true, log), onProgress, log)
+}
+
+// planCardPatch refuses any write that would land outside the nav image.
+func planCardPatch(scratchPath string, selected []int, log func(string)) ([]disk.Range, error) {
+	f, err := os.Open(scratchPath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	size, err := fileSize(f)
+	if err != nil {
+		return nil, err
+	}
+
+	var ranges []disk.Range
+	for _, i := range selected {
+		row := patchRows[i]
+		if row.plan == nil {
+			return nil, fmt.Errorf("%s: no in-place card plan for this patch", row.title)
+		}
+		log("Planning: " + row.title)
+		res, writes, err := row.plan(f, size, log)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", row.title, err)
+		}
+		lo, hi := res.Target.Offset, res.Target.Offset+int64(res.Target.Size)
+		for _, w := range writes {
+			if w.Offset < lo || w.Offset+int64(len(w.Data)) > hi {
+				return nil, fmt.Errorf("planned write at 0x%x falls outside the nav image (0x%x-0x%x)", w.Offset, lo, hi)
+			}
+			ranges = append(ranges, disk.Range{Offset: w.Offset, Data: w.Data})
+		}
+		log(fmt.Sprintf("%s: %d page(s) planned", row.title, len(writes)))
+	}
+	return ranges, nil
+}
+
+// applyCardPatch writes in one privileged step, then reads back to confirm.
+func applyCardPatch(d disk.Info, ranges []disk.Range, log func(string)) error {
+	var total int64
+	for _, r := range ranges {
+		total += int64(len(r.Data))
+	}
+	log(fmt.Sprintf("Writing %d page range(s), %s, to %s...", len(ranges), humansize.Format(total), d.Node()))
+	if err := disk.WriteRanges(d, ranges); err != nil {
+		return fmt.Errorf("writing the card: %w", err)
+	}
+	log("Reading the written ranges back...")
+	got, err := disk.ReadRanges(d, ranges)
+	if err != nil {
+		return fmt.Errorf("reading back: %w", err)
+	}
+	for i, r := range ranges {
+		if !bytes.Equal(got[i], r.Data) {
+			return fmt.Errorf("read-back mismatch at 0x%x", r.Offset)
+		}
+	}
+	log(fmt.Sprintf("Read-back matches: %d page range(s), %s", len(ranges), humansize.Format(total)))
 	return nil
 }
 

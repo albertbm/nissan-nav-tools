@@ -246,6 +246,27 @@ func TestFindNamesAnUnknownBuild(t *testing.T) {
 	}
 }
 
+// TestDiffPagesStaysInRange checks a write never lands outside the .mod it came from.
+func TestDiffPagesStaysInRange(t *testing.T) {
+	const base = 0x200000 + 123
+	before := make([]byte, 3*pageSize+100)
+	mod := bytes.Clone(before)
+	mod[50] = 1
+	mod[pageSize+10] = 1
+	mod[len(mod)-1] = 1
+
+	writes := diffPages(before, mod, base)
+	if len(writes) != 3 {
+		t.Fatalf("got %d page writes, want 3", len(writes))
+	}
+	lo, hi := int64(base), int64(base+len(mod))
+	for _, w := range writes {
+		if w.Offset < lo || w.Offset+int64(len(w.Data)) > hi {
+			t.Errorf("write at 0x%x, %d bytes, falls outside 0x%x-0x%x", w.Offset, len(w.Data), lo, hi)
+		}
+	}
+}
+
 func newRWAt(b []byte) ReadWriterAt { return &memRWAt{b} }
 
 type memRWAt struct{ b []byte }

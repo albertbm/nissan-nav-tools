@@ -45,6 +45,16 @@ func TestParseInfo(t *testing.T) {
 	}
 }
 
+func TestParseInfoReadsRemovableMedia(t *testing.T) {
+	info, err := parseInfo([]byte(`{"DeviceIdentifier":"disk5","Internal":false,"RemovableMedia":true,"Size":64000000000}`))
+	if err != nil {
+		t.Fatalf("parseInfo: %v", err)
+	}
+	if !info.Removable {
+		t.Error("RemovableMedia did not come through as true")
+	}
+}
+
 func TestParseInfoRefusesAnInternalDisk(t *testing.T) {
 	info, err := parseInfo([]byte(`{"DeviceIdentifier":"disk0","Internal":true,"Size":1}`))
 	if err != nil {

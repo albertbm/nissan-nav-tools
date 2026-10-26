@@ -3,7 +3,7 @@
 Tools for the map card in a Nissan Leaf's Clarion QY8 head unit.
 
 - Back up: copies a card to an image, trimming the unused tail.
-- Patch: skips the telematics consent screen.
+- Patch: skips the telematics consent screen, in place on the file or a card if you ask.
 - Anonymize: clears phonebook, pairings, addresses, history and settings.
 - Trim: cuts the dead space after the last partition.
 

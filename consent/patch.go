@@ -115,46 +115,68 @@ func findBySignature(f io.ReaderAt, size int64) (Target, error) {
 	return Target{}, fmt.Errorf("no nav image this patcher knows is on that target")
 }
 
-// ApplyConsentSkip refuses to write unless the handler matches byte for
-// byte, so a map version whose addresses moved is left alone, not corrupted.
-func ApplyConsentSkip(f ReadWriterAt, size int64, log func(string)) (Result, error) {
+type PageWrite struct {
+	Offset int64
+	Data   []byte
+}
+
+func PlanConsentSkip(f io.ReaderAt, size int64, log func(string)) (Result, []PageWrite, error) {
 	t, err := Find(f, size)
 	if err != nil {
-		return Result{}, err
+		return Result{}, nil, err
 	}
 	bd, ok := findBuild(t.Build)
 	if !ok {
-		return Result{Target: t}, fmt.Errorf("no patch for app version %q on this card", t.Build)
+		return Result{Target: t}, nil, fmt.Errorf("no patch for app version %q on this card", t.Build)
 	}
 	log(fmt.Sprintf("Found %s at 0x%x, %d bytes", bd.name, t.Offset, bd.modLen))
 
 	mod := make([]byte, bd.modLen)
 	if _, err := f.ReadAt(mod, t.Offset); err != nil && err != io.EOF {
-		return Result{}, fmt.Errorf("cannot read the nav image: %w", err)
+		return Result{}, nil, fmt.Errorf("cannot read the nav image: %w", err)
 	}
 	before := bytes.Clone(mod)
 
 	res, err := patchMod(mod, bd, log)
 	if err != nil {
-		return Result{}, err
+		return Result{}, nil, err
 	}
 	res.Target = t
 
-	start := t.Offset
-	for abs := start / pageSize * pageSize; abs < start+int64(len(mod)); abs += pageSize {
-		lo := max(abs, start) - start
-		hi := min(abs+pageSize, start+int64(len(mod))) - start
-		if bytes.Equal(mod[lo:hi], before[lo:hi]) {
-			continue
-		}
-		if _, err := f.WriteAt(mod[lo:hi], start+lo); err != nil {
-			return res, fmt.Errorf("cannot write at 0x%x: %w", start+lo, err)
-		}
-		res.Pages++
-	}
+	writes := diffPages(before, mod, t.Offset)
+	res.Pages = len(writes)
 
 	sum := sha256.Sum256(mod)
 	res.SHA256 = hex.EncodeToString(sum[:])
+	return res, writes, nil
+}
+
+// diffPages keeps every write inside [base, base+len(mod)), the .mod container the two came from.
+func diffPages(before, mod []byte, base int64) []PageWrite {
+	var writes []PageWrite
+	for abs := base / pageSize * pageSize; abs < base+int64(len(mod)); abs += pageSize {
+		lo := max(abs, base) - base
+		hi := min(abs+pageSize, base+int64(len(mod))) - base
+		if bytes.Equal(mod[lo:hi], before[lo:hi]) {
+			continue
+		}
+		writes = append(writes, PageWrite{Offset: base + lo, Data: bytes.Clone(mod[lo:hi])})
+	}
+	return writes
+}
+
+// ApplyConsentSkip refuses to write unless the handler matches byte for
+// byte, so a map version whose addresses moved is left alone, not corrupted.
+func ApplyConsentSkip(f ReadWriterAt, size int64, log func(string)) (Result, error) {
+	res, writes, err := PlanConsentSkip(f, size, log)
+	if err != nil {
+		return res, err
+	}
+	for _, w := range writes {
+		if _, err := f.WriteAt(w.Data, w.Offset); err != nil {
+			return res, fmt.Errorf("cannot write at 0x%x: %w", w.Offset, err)
+		}
+	}
 	log(fmt.Sprintf("Wrote %d pages of 4 KiB", res.Pages))
 	log("Nav image sha256: " + res.SHA256)
 	return res, nil
