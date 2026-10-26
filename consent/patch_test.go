@@ -223,7 +223,7 @@ func TestFindReportsNothingOnAnEmptyCard(t *testing.T) {
 func TestFindNamesAnUnknownBuild(t *testing.T) {
 	img := make([]byte, 4<<20)
 	at := 0x200000
-	copy(img[at+offName:], "G214ELNI.017")
+	copy(img[at+offName:], "G214ELNI.999")
 	copy(img[at+segOffset:], "MTCP")
 	binary.LittleEndian.PutUint32(img[at+offPayloadLen:], 123)
 
@@ -234,8 +234,8 @@ func TestFindNamesAnUnknownBuild(t *testing.T) {
 	if got.Offset != int64(at) {
 		t.Errorf("found the nav image at 0x%x, want 0x%x", got.Offset, at)
 	}
-	if got.Build != "G214ELNI.017" {
-		t.Errorf("build %q, want %q", got.Build, "G214ELNI.017")
+	if got.Build != "G214ELNI.999" {
+		t.Errorf("build %q, want %q", got.Build, "G214ELNI.999")
 	}
 
 	if _, ok := findBuild(got.Build); ok {

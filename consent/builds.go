@@ -108,6 +108,37 @@ var builds = []build{
 			},
 		},
 	},
+	{
+		name:       "G214ELNI.017", // ME0
+		modLen:     30675968,
+		codeROM:    0xa11000,
+		codeVA:     0x412e1000,
+		getContext: 0x419d4c38,
+		setVar:     0x419d4aa8,
+		getState:   0x419d4b08,
+		getState2:  0x419d4ac8,
+		evHandler:  0x419d4d18,
+		execFn:     0x419d4c88,
+		skip: handler{
+			va:         0x418b7e78,
+			tail:       0x418b7f20,
+			pTrue:      0x418b7f30,
+			varSkip:    47,
+			varAgree:   224,
+			varStartup: 565,
+			action:     4678,
+			ctrl:       25,
+			notify:     1611,
+			stock: []uint32{
+				0xeb04736e, 0xe58d00d4, 0xe59f20a4, 0xe3a0102f, 0xe59d00d4,
+				0xeb047305, 0xeb047368, 0xe58d00d8, 0xe59d00d8, 0xeb047319,
+				0xe58d00dc, 0xe3011246, 0xe59d00dc, 0xeb047399, 0xe58d00e0,
+				0xe59d30e0, 0xe3530000, 0x1a000007, 0xeb04735c, 0xe58d00e4,
+				0xe59d00e4, 0xeb0472fd, 0xe58d00e8, 0xe3011246, 0xe59d00e8,
+				0xeb04738d, 0xe3a03001, 0xe58d3000, 0xea00000c,
+			},
+		},
+	},
 }
 
 // skipBody writes VAR_CWS_AGREE_SKIP as "true", sets both agree-status
