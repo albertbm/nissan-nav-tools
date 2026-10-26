@@ -213,6 +213,25 @@ func TestFindSkipsUnalignedNames(t *testing.T) {
 	}
 }
 
+func TestFindStopsAtTheGivenLimit(t *testing.T) {
+	const limit = 1 << 20
+	img := make([]byte, 6<<20)
+	const plantedAt = 4 << 20
+	copy(img[plantedAt+offName:], builds[0].name)
+
+	if _, err := Find(bytes.NewReader(img), limit); err == nil {
+		t.Error("Find saw a name planted past the given limit")
+	}
+
+	got, err := Find(bytes.NewReader(img), int64(len(img)))
+	if err != nil {
+		t.Fatalf("Find over the whole image: %v", err)
+	}
+	if got.Offset != plantedAt {
+		t.Errorf("found the nav image at 0x%x, want 0x%x", got.Offset, plantedAt)
+	}
+}
+
 func TestFindReportsNothingOnAnEmptyCard(t *testing.T) {
 	img := make([]byte, 3<<20)
 	if _, err := Find(bytes.NewReader(img), int64(len(img))); err == nil {

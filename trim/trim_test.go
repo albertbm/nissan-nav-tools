@@ -104,6 +104,18 @@ func TestSize_Unparsable(t *testing.T) {
 	}
 }
 
+func TestFirstPartitionStart(t *testing.T) {
+	sector0 := make([]byte, 512)
+	sector1 := mbrSector(true, 888833, 29630464)
+	got, err := FirstPartitionStart(image(sector0, sector1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := int64(888833) * sectorSize; got != want {
+		t.Errorf("got %d, want %d", got, want)
+	}
+}
+
 func TestSize_ClarionSignatureButNoPartitions(t *testing.T) {
 	sector0 := make([]byte, 512)
 	sector1 := make([]byte, 512)

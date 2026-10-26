@@ -214,22 +214,9 @@ func refuseUnlessCard(d disk.Info) error {
 	return nil
 }
 
-func readCardToScratch(d disk.Info, scratch string, onProgress func(int64), log func(string)) (int64, error) {
-	return backupJob(d, scratch, trimTarget(d, true, log), onProgress, log)
-}
-
 // planCardPatch refuses any write that would land outside the nav image.
-func planCardPatch(scratchPath string, selected []int, log func(string)) ([]disk.Range, error) {
-	f, err := os.Open(scratchPath)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	size, err := fileSize(f)
-	if err != nil {
-		return nil, err
-	}
-
+// limit bounds the search for it (consent.Find scans no further); 0 means no bound.
+func planCardPatch(r io.ReaderAt, limit int64, selected []int, log func(string)) ([]disk.Range, error) {
 	var ranges []disk.Range
 	for _, i := range selected {
 		row := patchRows[i]
@@ -237,7 +224,7 @@ func planCardPatch(scratchPath string, selected []int, log func(string)) ([]disk
 			return nil, fmt.Errorf("%s: no in-place card plan for this patch", row.title)
 		}
 		log("Planning: " + row.title)
-		res, writes, err := row.plan(f, size, log)
+		res, writes, err := row.plan(r, limit, log)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", row.title, err)
 		}
@@ -251,6 +238,23 @@ func planCardPatch(scratchPath string, selected []int, log func(string)) ([]disk
 		log(fmt.Sprintf("%s: %d page(s) planned", row.title, len(writes)))
 	}
 	return ranges, nil
+}
+
+// Reads straight off the device, no scratch copy of the card; the caller must unmount d first.
+func planCardPatchDevice(d disk.Info, selected []int, log func(string)) ([]disk.Range, error) {
+	f, err := disk.OpenRaw(d, false)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	limit, err := trim.FirstPartitionStart(f)
+	if err != nil {
+		return nil, fmt.Errorf("reading the partition table: %w", err)
+	}
+	log(fmt.Sprintf("Nav image area is the first %s of the card", humansize.Format(limit)))
+
+	return planCardPatch(disk.NewBufferedReaderAt(f), limit, selected, log)
 }
 
 // Unmounts again right before writing: the card could have remounted while the confirmation dialog was up.

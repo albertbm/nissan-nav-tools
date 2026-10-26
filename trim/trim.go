@@ -59,6 +59,36 @@ func Size(r io.ReaderAt) (int64, error) {
 	return roundUp(end, mib), nil
 }
 
+// FirstPartitionStart is the byte offset of the lowest-LBA partition; everything before it is raw space, where the nav image lives.
+func FirstPartitionStart(r io.ReaderAt) (int64, error) {
+	sector0 := make([]byte, sectorSize)
+	if _, err := r.ReadAt(sector0, 0); err != nil {
+		return 0, fmt.Errorf("reading sector 0: %w", err)
+	}
+	sector1 := make([]byte, sectorSize)
+	if _, err := r.ReadAt(sector1, sectorSize); err != nil {
+		return 0, fmt.Errorf("reading sector 1: %w", err)
+	}
+
+	table, tableName := sector0, "sector 0"
+	if bytes.HasPrefix(sector1, []byte("CLARION ID")) {
+		table, tableName = sector1, "sector 1"
+	}
+
+	parts, err := readPartitionTable(table)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", tableName, err)
+	}
+
+	start := parts[0].lba
+	for _, p := range parts[1:] {
+		if p.lba < start {
+			start = p.lba
+		}
+	}
+	return start * sectorSize, nil
+}
+
 // readPartitionTable reads the MBR entry layout at 0x1be, shared by a Clarion sector 1 and an ordinary sector 0.
 func readPartitionTable(sector []byte) ([]partEntry, error) {
 	if len(sector) < 512 || sector[510] != 0x55 || sector[511] != 0xaa {

@@ -304,6 +304,7 @@ func runFilePatch(inPath string, detected appVersion, selected []int,
 	}()
 }
 
+// Shows the in-place warning before touching the card, then reads only the raw area before partition 1, never a full copy.
 func runCardPatch(d disk.Info, selected []int,
 	runBtn *widget.Button, spinner *widget.ProgressBarInfinite, status *widget.Label, clearLog func(), appendLog func(string)) {
 	if err := refuseUnlessCard(d); err != nil {
@@ -311,43 +312,18 @@ func runCardPatch(d disk.Info, selected []int,
 		return
 	}
 
+	backupFirst, proceed := confirmInPlace(d.Identifier)
+	if !proceed {
+		status.SetText("Cancelled; nothing written.")
+		return
+	}
+
 	runBtn.Disable()
 	spinner.Show()
 	clearLog()
-	status.SetText("Reading the card...")
 	go func() {
 		defer fyne.Do(func() { runBtn.Enable(); spinner.Hide() })
 
-		scratch, err := newScratchFile()
-		if err != nil {
-			fyne.Do(func() { status.SetText("Failed: " + err.Error()) })
-			return
-		}
-		defer os.Remove(scratch)
-
-		if _, err := readCardToScratch(d, scratch, nil, appendLog); err != nil {
-			fyne.Do(func() { status.SetText("Failed: " + err.Error()) })
-			return
-		}
-
-		av := detectAppVersion(scratch)
-		switch {
-		case av.err != nil:
-			fyne.Do(func() { status.SetText("Failed: " + av.err.Error()) })
-			return
-		case !av.supported:
-			fyne.Do(func() {
-				status.SetText(fmt.Sprintf("No patch for app version %q on this card; nothing written.", av.name))
-			})
-			return
-		}
-		appendLog("App version: " + av.name)
-
-		backupFirst, proceed := confirmInPlace(d.Identifier)
-		if !proceed {
-			fyne.Do(func() { status.SetText("Cancelled; nothing written.") })
-			return
-		}
 		if backupFirst {
 			dest, err := zenity.SelectFileSave(
 				zenity.Filename(filepath.Join(fallbackOutputDir(), d.Identifier+".backup.img")),
@@ -360,20 +336,28 @@ func runCardPatch(d disk.Info, selected []int,
 				fyne.Do(func() { status.SetText(msg) })
 				return
 			}
-			if err := backupCopy(scratch, dest, appendLog); err != nil {
+			fyne.Do(func() { status.SetText("Backing up the card...") })
+			if _, err := backupJob(d, dest, 0, nil, appendLog); err != nil {
 				fyne.Do(func() { status.SetText("Failed: " + err.Error()) })
 				return
 			}
+			appendLog("Backup written: " + dest)
 		}
 
-		fyne.Do(func() { status.SetText("Planning the patch...") })
-		ranges, err := planCardPatch(scratch, selected, appendLog)
+		fyne.Do(func() { status.SetText("Unmounting the card...") })
+		if err := disk.Unmount(d.Identifier); err != nil {
+			fyne.Do(func() { status.SetText("Failed: " + err.Error()) })
+			return
+		}
+
+		fyne.Do(func() { status.SetText("Reading the card...") })
+		ranges, err := planCardPatchDevice(d, selected, appendLog)
 		if err != nil {
 			fyne.Do(func() { status.SetText("Failed: " + err.Error()) })
 			return
 		}
 
-		fyne.Do(func() { status.SetText("Writing the card...") })
+		fyne.Do(func() { status.SetText("Patching...") })
 		if err := applyCardPatch(d, ranges, appendLog); err != nil {
 			fyne.Do(func() { status.SetText("Failed: " + err.Error()) })
 			return

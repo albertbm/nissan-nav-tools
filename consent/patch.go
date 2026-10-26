@@ -40,12 +40,39 @@ type Result struct {
 	SHA256       string
 }
 
+// ProbeOffset is where the nav image sits on every card measured so far (ZE1, ZE0, ME0).
+const ProbeOffset = 0x4d00000
+
 // Find names the build it recognises, or, failing that, whatever build name the image itself claims.
 func Find(f io.ReaderAt, size int64) (Target, error) {
+	if t, err := probeFixed(f); err == nil {
+		return t, nil
+	}
 	if t, err := findKnown(f, size); err == nil {
 		return t, nil
 	}
 	return findBySignature(f, size)
+}
+
+// probeFixed checks ProbeOffset before any scan; a known build name there plus the MTCP magic is proof enough.
+func probeFixed(f io.ReaderAt) (Target, error) {
+	hdr := make([]byte, offSegTable)
+	if _, err := f.ReadAt(hdr, ProbeOffset); err != nil {
+		return Target{}, err
+	}
+	nameField := hdr[offName:]
+	if nul := bytes.IndexByte(nameField, 0); nul >= 0 {
+		nameField = nameField[:nul]
+	}
+	bd, ok := findBuild(string(nameField))
+	if !ok {
+		return Target{}, fmt.Errorf("no recognised build at the probe offset")
+	}
+	magic := make([]byte, 4)
+	if _, err := f.ReadAt(magic, ProbeOffset+segOffset); err != nil || string(magic) != "MTCP" {
+		return Target{}, fmt.Errorf("no MTCP segment where the probe expects one")
+	}
+	return Target{Offset: ProbeOffset, Build: bd.name, Size: bd.modLen}, nil
 }
 
 func findKnown(f io.ReaderAt, size int64) (Target, error) {
@@ -124,6 +151,9 @@ func PlanConsentSkip(f io.ReaderAt, size int64, log func(string)) (Result, []Pag
 	t, err := Find(f, size)
 	if err != nil {
 		return Result{}, nil, err
+	}
+	if t.Offset != ProbeOffset {
+		log(fmt.Sprintf("Nav image not at the usual offset; found it by scanning, at 0x%x", t.Offset))
 	}
 	bd, ok := findBuild(t.Build)
 	if !ok {
