@@ -23,4 +23,6 @@ No arguments (or `gui`) opens the window.
 
 The GUI uses Fyne and cgo: build on the target OS, or use [fyne-cross](https://github.com/fyne-io/fyne-cross).
 
+Prebuilt: see Releases.
+
 Not affiliated with Nissan or Clarion.
