@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -29,10 +30,12 @@ func fakeSysBlockDisk(t *testing.T, root, name string, sectors uint64, removable
 	}
 	writeFile(t, filepath.Join(dir, "removable"), r)
 	if usbSymlink != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		// A real target, so device/vendor and device/model can be written through the link.
+		target := filepath.Join(root, "sys", strings.TrimLeft(usbSymlink, "./"))
+		if err := os.MkdirAll(target, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Symlink(usbSymlink, filepath.Join(dir, "device")); err != nil {
+		if err := os.Symlink(target, filepath.Join(dir, "device")); err != nil {
 			t.Fatal(err)
 		}
 	}
