@@ -21,8 +21,8 @@ jobs:
             arch: amd64
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - run: go vet ./...
@@ -34,7 +34,7 @@ jobs:
       - name: Zip app
         working-directory: cmd/nissan-nav-tools
         run: ditto -c -k --keepParent "Nissan Nav Tools.app" "nissan-nav-tools-macos-${{ matrix.arch }}.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nissan-nav-tools-macos-${{ matrix.arch }}
           path: cmd/nissan-nav-tools/nissan-nav-tools-macos-${{ matrix.arch }}.zip
@@ -42,8 +42,8 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - run: go vet ./...
@@ -58,16 +58,16 @@ jobs:
         run: |
           $exe = Get-ChildItem -Filter *.exe | Select-Object -First 1
           Compress-Archive -Path $exe.FullName -DestinationPath nissan-nav-tools-windows-amd64.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nissan-nav-tools-windows-amd64
           path: cmd/nissan-nav-tools/nissan-nav-tools-windows-amd64.zip
 
   linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Install Fyne build deps
@@ -78,7 +78,7 @@ jobs:
         run: go build -o nissan-nav-tools ./cmd/nissan-nav-tools
       - name: Archive
         run: tar -czf nissan-nav-tools-linux-amd64.tar.gz nissan-nav-tools
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nissan-nav-tools-linux-amd64
           path: nissan-nav-tools-linux-amd64.tar.gz
@@ -86,11 +86,11 @@ jobs:
   release:
     needs: [macos, windows, linux]
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
       - name: Flatten artifacts
@@ -99,7 +99,7 @@ jobs:
           find artifacts -type f \( -name '*.zip' -o -name '*.tar.gz' \) -exec cp {} dist/ \;
           ls -la dist
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           prerelease: ${{ contains(github.ref_name, '-') }}
