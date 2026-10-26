@@ -1,6 +1,11 @@
 package disk
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 // Captured from `diskutil list -plist external physical | plutil -convert json -o - -`
 // on a Mac with one external SSD (disk4) and no card reader attached.
@@ -68,5 +73,39 @@ func TestParseInfoRefusesAnInternalDisk(t *testing.T) {
 func TestParseWholeDisksRejectsGarbage(t *testing.T) {
 	if _, err := parseWholeDisks([]byte("not json")); err == nil {
 		t.Error("parseWholeDisks accepted garbage")
+	}
+}
+
+func TestDDWriteScriptArgs(t *testing.T) {
+	d := Info{Identifier: "disk5"}
+	script := ddWriteScript("/tmp/card.img", d.Node(), "/tmp/progress")
+	for _, want := range []string{"if='/tmp/card.img'", "of='/dev/rdisk5'", "bs=16m"} {
+		if !strings.Contains(script, want) {
+			t.Errorf("script missing %q:\n%s", want, script)
+		}
+	}
+}
+
+func TestLastDDWrittenParsesSIGINFOOutput(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "progress")
+	log := "12+0 records in\n12+0 records out\n201326592 bytes transferred in 3.1 secs (64942449 bytes/sec)\n"
+	if err := os.WriteFile(path, []byte(log), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	n, ok := lastDDWritten(path)
+	if !ok || n != 201326592 {
+		t.Errorf("got %d, %v, want 201326592, true", n, ok)
+	}
+}
+
+func TestLastDDWrittenNoDataYet(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "progress")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := lastDDWritten(path); ok {
+		t.Error("reported progress before dd printed any")
 	}
 }

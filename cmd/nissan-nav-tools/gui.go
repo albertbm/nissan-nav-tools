@@ -58,6 +58,7 @@ func runGUI() {
 
 	w.SetContent(container.NewAppTabs(
 		container.NewTabItem("Back up", newBackupTab(w)),
+		container.NewTabItem("Restore", newRestoreTab(w)),
 		container.NewTabItem("Patch image", newPatchTab(w)),
 		container.NewTabItem("Anonymize", newAnonymizeTab(w)),
 	))

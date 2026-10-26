@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"nissan-nav-tools/anonymize"
 	"nissan-nav-tools/consent"
 	"nissan-nav-tools/internal/clone"
+	"nissan-nav-tools/internal/disk"
 	"nissan-nav-tools/internal/humansize"
 	"nissan-nav-tools/trim"
 )
@@ -138,6 +140,81 @@ func runConsentCLI(args []string) int {
 	fmt.Printf("patched %s\n", target)
 	fmt.Printf("build %s, chunk %d: %d -> %d bytes, %d pages written\n",
 		res.Target.Build, res.Chunk, res.Stock, res.Packed, res.Pages)
+	return 0
+}
+
+func runRestoreCLI(args []string) int {
+	fs := flag.NewFlagSet("restore", flag.ExitOnError)
+	in := fs.String("in", "", "image file to write to the card (required)")
+	diskID := fs.String("disk", "", "disk identifier to write onto, e.g. disk4 (required)")
+	verify := fs.Bool("verify", false, "read the card back and compare its sha256 with the image")
+	yes := fs.Bool("yes", false, "skip the typed confirmation")
+	fs.Parse(args)
+
+	if *in == "" || *diskID == "" {
+		fmt.Fprintln(os.Stderr, "restore: -in and -disk are required")
+		return 2
+	}
+
+	fi, err := os.Stat(*in)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "restore: %v\n", err)
+		return 1
+	}
+
+	disks, err := disk.List()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "restore: %v\n", err)
+		return 1
+	}
+	var d disk.Info
+	found := false
+	for _, c := range disks {
+		if c.Identifier == *diskID {
+			d, found = c, true
+			break
+		}
+	}
+	if !found {
+		fmt.Fprintf(os.Stderr, "restore: %s is not an external, removable disk, or isn't attached\n", *diskID)
+		return 1
+	}
+	if err := refuseUnlessCard(d); err != nil {
+		fmt.Fprintf(os.Stderr, "restore: %v\n", err)
+		return 1
+	}
+	if err := refuseIfTooSmall(d, fi.Size()); err != nil {
+		fmt.Fprintf(os.Stderr, "restore: %v\n", err)
+		return 1
+	}
+
+	fmt.Printf("image: %s, card: %s\n", humansize.Format(fi.Size()), humansize.Format(d.Size))
+	if av := detectAppVersion(*in); av.err == nil {
+		fmt.Printf("image app version: %s\n", av.name)
+	}
+
+	if !*yes {
+		fmt.Printf("This erases everything on %s and writes %s to it. There is no undo.\n", d.Identifier, *in)
+		fmt.Printf("Type %s to continue: ", d.Identifier)
+		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+		if strings.TrimSpace(line) != d.Identifier {
+			fmt.Fprintln(os.Stderr, "restore: confirmation didn't match, nothing written")
+			return 1
+		}
+	}
+
+	log := func(s string) { fmt.Println(s) }
+	if err := restoreJob(d, *in, nil, log); err != nil {
+		fmt.Fprintf(os.Stderr, "restore: %v\n", err)
+		return 1
+	}
+	if *verify {
+		if err := verifyRestore(d, *in, log); err != nil {
+			fmt.Fprintf(os.Stderr, "restore: %v\n", err)
+			return 1
+		}
+	}
+	fmt.Printf("restored %s onto %s\n", *in, d.Identifier)
 	return 0
 }
 

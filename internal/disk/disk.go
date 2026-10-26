@@ -9,7 +9,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -220,6 +222,106 @@ func ReadRaw(id Info, outPath string, maxBytes int64, onProgress func(written in
 		}()
 	}
 	err := cmd.Wait()
+	close(stop)
+	if err != nil {
+		return fmt.Errorf("dd: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+func Eject(id string) error {
+	if runtime.GOOS != "darwin" {
+		return errUnsupported
+	}
+	out, err := exec.Command("diskutil", "eject", id).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("diskutil eject %s: %w: %s", id, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// dd's SIGINFO output goes to progressPath so the unprivileged app can read progress.
+func ddWriteScript(srcPath, node, progressPath string) string {
+	return fmt.Sprintf(`set -e
+/bin/dd if=%s of=%s bs=16m 2>>%s &
+pid=$!
+while kill -0 "$pid" 2>/dev/null; do
+  sleep 1
+  kill -INFO "$pid" 2>/dev/null || true
+done
+wait "$pid"
+`, appleScriptQuote(srcPath), appleScriptQuote(node), appleScriptQuote(progressPath))
+}
+
+var ddBytesRe = regexp.MustCompile(`(\d+) bytes transferred`)
+
+func lastDDWritten(progressPath string) (int64, bool) {
+	data, err := os.ReadFile(progressPath)
+	if err != nil {
+		return 0, false
+	}
+	matches := ddBytesRe.FindAllSubmatch(data, -1)
+	if len(matches) == 0 {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(string(matches[len(matches)-1][1]), 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// WriteRaw writes srcPath onto id's raw device in one privileged step. Only
+// srcPath's own bytes are written; whatever lies past it on the card is
+// untouched. onProgress, if set, is polled from SIGINFO's output.
+func WriteRaw(id Info, srcPath string, onProgress func(written int64)) error {
+	if runtime.GOOS != "darwin" {
+		return errUnsupported
+	}
+	if err := refuseUnlessCard(id); err != nil {
+		return err
+	}
+
+	dir, err := os.MkdirTemp("", "nnt-restore-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	progressPath := filepath.Join(dir, "progress")
+	if err := os.WriteFile(progressPath, nil, 0o666); err != nil {
+		return err
+	}
+	scriptPath := filepath.Join(dir, "write.sh")
+	if err := os.WriteFile(scriptPath, []byte(ddWriteScript(srcPath, id.Node(), progressPath)), 0o700); err != nil {
+		return err
+	}
+
+	ascript := fmt.Sprintf(`do shell script "/bin/bash %s" with administrator privileges`, appleScriptQuote(scriptPath))
+	cmd := exec.Command("osascript", "-e", ascript)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("starting the privileged write: %w", err)
+	}
+
+	stop := make(chan struct{})
+	if onProgress != nil {
+		go func() {
+			t := time.NewTicker(500 * time.Millisecond)
+			defer t.Stop()
+			for {
+				select {
+				case <-t.C:
+					if n, ok := lastDDWritten(progressPath); ok {
+						onProgress(n)
+					}
+				case <-stop:
+					return
+				}
+			}
+		}()
+	}
+	err = cmd.Wait()
 	close(stop)
 	if err != nil {
 		return fmt.Errorf("dd: %w: %s", err, strings.TrimSpace(stderr.String()))

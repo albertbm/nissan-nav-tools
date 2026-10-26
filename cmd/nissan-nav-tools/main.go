@@ -21,6 +21,8 @@ func main() {
 		os.Exit(runAnonymizeCLI(args[1:]))
 	case "consent":
 		os.Exit(runConsentCLI(args[1:]))
+	case "restore":
+		os.Exit(runRestoreCLI(args[1:]))
 	case "trim":
 		os.Exit(runTrimCLI(args[1:]))
 	case "-h", "-help", "--help":
@@ -37,5 +39,6 @@ func usage() {
   nissan-nav-tools [gui]                       open the GUI
   nissan-nav-tools anonymize -in X [-out Y]     zero personal data on a copy of X
   nissan-nav-tools consent -in X [-out Y]       skip the consent screen on a copy of X
-  nissan-nav-tools trim -in X [-out Y]          drop the dead space past X's last partition`)
+  nissan-nav-tools trim -in X [-out Y]          drop the dead space past X's last partition
+  nissan-nav-tools restore -in X -disk diskN [-verify] [-yes]   write X onto a card, wiping it`)
 }
