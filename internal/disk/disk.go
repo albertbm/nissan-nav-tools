@@ -61,12 +61,19 @@ func List() ([]Info, error) {
 		if err != nil {
 			continue // a disk that vanished between the two calls, not an error worth failing the list over
 		}
-		if info.Internal {
+		if !isCard(info) {
 			continue
 		}
 		out = append(out, info)
 	}
 	return out, nil
+}
+
+// Head unit cards top out at 64 GB; this keeps external drives off the list.
+const maxCardSize = 130_000_000_000
+
+func isCard(d Info) bool {
+	return !d.Internal && d.Removable && d.Size > 0 && d.Size <= maxCardSize
 }
 
 func infoFor(id string) (Info, error) {

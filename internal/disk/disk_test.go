@@ -109,3 +109,22 @@ func TestLastDDWrittenNoDataYet(t *testing.T) {
 		t.Error("reported progress before dd printed any")
 	}
 }
+
+func TestIsCard(t *testing.T) {
+	cases := []struct {
+		d    Info
+		want bool
+	}{
+		{Info{Removable: true, Size: 16_039_018_496}, true},
+		{Info{Removable: true, Size: 64_000_000_000}, true},
+		{Info{Removable: false, Size: 16_039_018_496}, false},
+		{Info{Removable: true, Size: 1_000_000_000_000}, false},
+		{Info{Internal: true, Removable: true, Size: 16_039_018_496}, false},
+		{Info{Removable: true}, false},
+	}
+	for _, c := range cases {
+		if got := isCard(c.d); got != c.want {
+			t.Errorf("isCard(%+v) = %v, want %v", c.d, got, c.want)
+		}
+	}
+}
