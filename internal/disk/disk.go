@@ -99,6 +99,20 @@ func List() ([]Info, error) {
 	return out, nil
 }
 
+// Report lists every disk and why it was or wasn't shown.
+func Report() []string {
+	disks, err := platformList()
+	var out []string
+	if err != nil {
+		out = append(out, "listing failed: "+err.Error())
+	}
+	for _, d := range disks {
+		out = append(out, fmt.Sprintf("%s %q %d bytes internal=%v removable=%v listed=%v",
+			d.Identifier, d.Name, d.Size, d.Internal, d.Removable, isCard(d)))
+	}
+	return append(out, platformNotes()...)
+}
+
 // OpenRaw opens id's raw device for I/O, refusing anything that isn't a card.
 func OpenRaw(id Info, write bool) (*os.File, error) {
 	if err := refuseUnlessCard(id); err != nil {

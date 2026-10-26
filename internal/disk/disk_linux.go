@@ -202,3 +202,5 @@ func platformOpen(id Info, write bool) (*os.File, error) {
 	}
 	return f, nil
 }
+
+func platformNotes() []string { return nil }

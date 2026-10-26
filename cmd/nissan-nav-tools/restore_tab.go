@@ -104,6 +104,9 @@ func newRestoreTab(w fyne.Window) fyne.CanvasObject {
 		diskSelect.ClearSelected()
 		updateSizes()
 		if len(labels) == 0 {
+			for _, l := range disk.Report() {
+				appendLog(l)
+			}
 			status.SetText("No card found. Insert one and press Refresh.")
 		} else {
 			status.SetText(fmt.Sprintf("%d disk(s) found.", len(labels)))

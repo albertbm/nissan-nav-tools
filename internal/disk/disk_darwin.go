@@ -175,3 +175,5 @@ func recvFD(sock int, name string) (*os.File, error) {
 	}
 	return os.NewFile(uintptr(rights[0]), name), nil
 }
+
+func platformNotes() []string { return nil }

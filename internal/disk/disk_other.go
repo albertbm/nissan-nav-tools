@@ -19,3 +19,5 @@ func platformOpen(id Info, write bool) (*os.File, error) { return nil, errUnsupp
 func platformUnmount(id string) error { return errUnsupported }
 
 func platformEject(id string) error { return errUnsupported }
+
+func platformNotes() []string { return nil }

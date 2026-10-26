@@ -146,6 +146,9 @@ func newPatchTab(w fyne.Window) fyne.CanvasObject {
 		diskSelect.Options = labels
 		diskSelect.ClearSelected()
 		if len(labels) == 0 {
+			for _, l := range disk.Report() {
+				appendLog(l)
+			}
 			status.SetText("No external, removable disk found. Insert the card and press Refresh.")
 		} else {
 			status.SetText(fmt.Sprintf("%d disk(s) found.", len(labels)))
