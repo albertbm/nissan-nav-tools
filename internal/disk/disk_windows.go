@@ -86,7 +86,7 @@ func diskInfo(h windows.Handle, n int) (Info, error) {
 	if err != nil {
 		return Info{}, err
 	}
-	internal, removable := classifyBusType(busType, removableMedia)
+	internal, removable := classifyBusType(busType, removableMedia, name)
 
 	var lenBuf [8]byte
 	var gotLen uint32
@@ -103,10 +103,12 @@ func diskInfo(h windows.Handle, n int) (Info, error) {
 	}, nil
 }
 
-// USB, SD and MMC count as a card reader even when Windows doesn't flag the media itself as removable.
-func classifyBusType(busType byte, removableMedia bool) (internal, removable bool) {
-	isCardBus := busType == busTypeUSB || busType == busTypeSD || busType == busTypeMMC
-	return !isCardBus, removableMedia || isCardBus
+// PCIe readers like Realtek's report bus SCSI, so check the media flag and name too.
+func classifyBusType(busType byte, removableMedia bool, name string) (internal, removable bool) {
+	n := strings.ToLower(strings.ReplaceAll(name, " ", ""))
+	card := busType == busTypeUSB || busType == busTypeSD || busType == busTypeMMC ||
+		removableMedia || strings.Contains(n, "cardreader")
+	return !card, card
 }
 
 func parseStorageDeviceDescriptor(buf []byte) (busType byte, removableMedia bool, name string, err error) {

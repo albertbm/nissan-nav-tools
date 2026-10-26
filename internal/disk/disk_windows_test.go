@@ -12,17 +12,20 @@ func TestClassifyBusType(t *testing.T) {
 		name           string
 		busType        byte
 		removableMedia bool
+		model          string
 		wantInternal   bool
 		wantRemovable  bool
 	}{
-		{"USB card reader", busTypeUSB, false, false, true},
-		{"SD slot", busTypeSD, false, false, true},
-		{"MMC slot", busTypeMMC, false, false, true},
-		{"internal SATA disk", 0x0B, false, true, false},
-		{"internal disk flagged removable anyway", 0x0B, true, true, true},
+		{"USB card reader", busTypeUSB, false, "Generic USB Reader", false, true},
+		{"SD slot", busTypeSD, false, "", false, true},
+		{"MMC slot", busTypeMMC, false, "", false, true},
+		{"internal SATA disk", 0x0B, false, "Samsung SSD", true, false},
+		{"internal NVMe disk", 0x11, false, "BC711 NVMe SK hynix 512GB", true, false},
+		{"Realtek PCIe reader on SCSI", 0x01, false, "Realtek PCIE CardReader", false, true},
+		{"SCSI reader flagged removable", 0x01, true, "Some Reader", false, true},
 	}
 	for _, c := range cases {
-		gotInternal, gotRemovable := classifyBusType(c.busType, c.removableMedia)
+		gotInternal, gotRemovable := classifyBusType(c.busType, c.removableMedia, c.model)
 		if gotInternal != c.wantInternal || gotRemovable != c.wantRemovable {
 			t.Errorf("%s: classifyBusType(%#x, %v) = (%v, %v), want (%v, %v)",
 				c.name, c.busType, c.removableMedia, gotInternal, gotRemovable, c.wantInternal, c.wantRemovable)
