@@ -193,7 +193,6 @@ func newRestoreTab(w fyne.Window) fyne.CanvasObject {
 					return nil
 				},
 				verifyCheck.Checked,
-				func() error { return ejectCard(d.Identifier, appendLog) },
 			)
 			if err != nil {
 				fyne.Do(func() { status.SetText("Failed: " + err.Error()) })

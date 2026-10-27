@@ -178,16 +178,6 @@ func platformUnmount(id string) error {
 	return nil
 }
 
-func platformEject(id string) error {
-	node := "/dev/" + id
-	if _, err := exec.LookPath("udisksctl"); err == nil {
-		exec.Command("udisksctl", "power-off", "-b", node).Run()
-		return nil
-	}
-	exec.Command("eject", node).Run()
-	return nil
-}
-
 func platformOpen(id Info, write bool) (*os.File, error) {
 	flags := os.O_RDONLY
 	if write {

@@ -152,8 +152,6 @@ func checkStillThere(id Info, disks []Info) error {
 
 func Unmount(id string) error { return platformUnmount(id) }
 
-func Eject(id string) error { return platformEject(id) }
-
 func ReadHeader(id Info) ([]byte, error) {
 	f, err := OpenRaw(id, false)
 	if err != nil {

@@ -98,14 +98,6 @@ func platformUnmount(id string) error {
 	return nil
 }
 
-func platformEject(id string) error {
-	out, err := exec.Command("diskutil", "eject", id).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("diskutil eject %s: %w: %s", id, err, strings.TrimSpace(string(out)))
-	}
-	return nil
-}
-
 // platformOpen goes through authopen, so Touch ID or a watch can clear the prompt instead of a typed password; no root shell ever touches the file.
 func platformOpen(id Info, write bool) (*os.File, error) {
 	args := []string{"-stdoutpipe"}

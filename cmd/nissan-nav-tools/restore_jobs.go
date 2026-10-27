@@ -43,26 +43,14 @@ func restoreJob(d disk.Info, imgPath string, onProgress func(int64), log func(st
 	return nil
 }
 
-// ejectCard is its own step: ejecting before a read-back verify can pull the device node that verify needs.
-func ejectCard(id string, log func(string)) error {
-	log(fmt.Sprintf("Ejecting %s...", id))
-	if err := disk.Eject(id); err != nil {
-		return fmt.Errorf("eject: %w", err)
-	}
-	return nil
-}
-
-// restoreSequence runs write, then verify if asked, then eject; a failed write or verify skips the eject.
-func restoreSequence(write, verify func() error, verifyWanted bool, eject func() error) error {
+func restoreSequence(write, verify func() error, verifyWanted bool) error {
 	if err := write(); err != nil {
 		return err
 	}
 	if verifyWanted {
-		if err := verify(); err != nil {
-			return err
-		}
+		return verify()
 	}
-	return eject()
+	return nil
 }
 
 func verifyRestore(d disk.Info, imgPath string, onProgress func(int64), log func(string)) error {

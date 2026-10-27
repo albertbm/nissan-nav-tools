@@ -19,7 +19,6 @@ const (
 	ioctlDiskGetLengthInfo          = 0x0007405C
 	ioctlDiskGetDriveGeometryEx     = 0x000700A0
 	ioctlVolumeGetVolumeDiskExtents = 0x00560000
-	ioctlStorageEjectMedia          = 0x002D4808
 	fsctlLockVolume                 = 0x00090018
 	fsctlDismountVolume             = 0x00090020
 )
@@ -279,25 +278,6 @@ func lockAndDismount(h windows.Handle) error {
 	if err := windows.DeviceIoControl(h, fsctlDismountVolume, nil, 0, nil, 0, &got, nil); err != nil {
 		return fmt.Errorf("FSCTL_DISMOUNT_VOLUME: %w", err)
 	}
-	return nil
-}
-
-func platformEject(id string) error {
-	diskNum, err := diskNumberFromIdentifier(id)
-	if err != nil {
-		return err
-	}
-	releaseLocks(diskNum)
-
-	h, err := openDiskHandle(fmt.Sprintf(`\\.\PhysicalDrive%d`, diskNum), true)
-	if err != nil {
-		return nil
-	}
-	defer windows.CloseHandle(h)
-
-	var got uint32
-	// Ejecting often isn't supported on a reader slot; that's not treated as an error.
-	_ = windows.DeviceIoControl(h, ioctlStorageEjectMedia, nil, 0, nil, 0, &got, nil)
 	return nil
 }
 

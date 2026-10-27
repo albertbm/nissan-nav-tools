@@ -271,7 +271,6 @@ func runRestoreCLI(args []string) int {
 			return nil
 		},
 		*verify,
-		func() error { return ejectCard(d.Identifier, log) },
 	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "restore: %v\n", err)

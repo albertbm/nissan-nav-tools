@@ -40,19 +40,12 @@ func TestRestoreSequenceOrder(t *testing.T) {
 	var calls []string
 	write := func() error { calls = append(calls, "write"); return nil }
 	verify := func() error { calls = append(calls, "verify"); return nil }
-	eject := func() error { calls = append(calls, "eject"); return nil }
 
-	if err := restoreSequence(write, verify, true, eject); err != nil {
+	if err := restoreSequence(write, verify, true); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"write", "verify", "eject"}
-	if len(calls) != len(want) {
-		t.Fatalf("got %v, want %v", calls, want)
-	}
-	for i := range want {
-		if calls[i] != want[i] {
-			t.Fatalf("got %v, want %v", calls, want)
-		}
+	if len(calls) != 2 || calls[0] != "write" || calls[1] != "verify" {
+		t.Fatalf("got %v, want [write verify]", calls)
 	}
 }
 
@@ -60,41 +53,33 @@ func TestRestoreSequenceSkipsVerify(t *testing.T) {
 	var calls []string
 	write := func() error { calls = append(calls, "write"); return nil }
 	verify := func() error { calls = append(calls, "verify"); return nil }
-	eject := func() error { calls = append(calls, "eject"); return nil }
 
-	if err := restoreSequence(write, verify, false, eject); err != nil {
+	if err := restoreSequence(write, verify, false); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"write", "eject"}
-	if len(calls) != len(want) || calls[0] != want[0] || calls[1] != want[1] {
-		t.Fatalf("got %v, want %v", calls, want)
+	if len(calls) != 1 || calls[0] != "write" {
+		t.Fatalf("got %v, want [write]", calls)
 	}
 }
 
-func TestRestoreSequenceStopsOnVerifyFailure(t *testing.T) {
-	var ejected bool
+func TestRestoreSequenceReportsVerifyFailure(t *testing.T) {
 	write := func() error { return nil }
 	verify := func() error { return fmt.Errorf("sha256 mismatch") }
-	eject := func() error { ejected = true; return nil }
 
-	if err := restoreSequence(write, verify, true, eject); err == nil {
+	if err := restoreSequence(write, verify, true); err == nil {
 		t.Fatal("restoreSequence didn't report the verify failure")
-	}
-	if ejected {
-		t.Error("ejected after a failed verify; the card should stay put")
 	}
 }
 
 func TestRestoreSequenceStopsOnWriteFailure(t *testing.T) {
-	var verified, ejected bool
+	var verified bool
 	write := func() error { return fmt.Errorf("short write") }
 	verify := func() error { verified = true; return nil }
-	eject := func() error { ejected = true; return nil }
 
-	if err := restoreSequence(write, verify, true, eject); err == nil {
+	if err := restoreSequence(write, verify, true); err == nil {
 		t.Fatal("restoreSequence didn't report the write failure")
 	}
-	if verified || ejected {
-		t.Error("ran verify or eject after a failed write")
+	if verified {
+		t.Error("ran verify after a failed write")
 	}
 }
