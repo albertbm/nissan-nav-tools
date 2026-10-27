@@ -53,6 +53,11 @@ func prepareTarget(in, out, suffix string, inPlace, force bool) (path string, er
 	if out == "" {
 		out = defaultOutput(in, suffix)
 	}
+	if same, err := clone.SameFile(in, out); err != nil {
+		return "", err
+	} else if same {
+		return "", fmt.Errorf("-out is the same file as -in; pick a different path or use -in-place")
+	}
 	if _, err := os.Stat(out); err == nil {
 		if !force {
 			return "", fmt.Errorf("%s already exists; pick another -out or pass -force", out)
@@ -301,6 +306,13 @@ func runTrimCLI(args []string) int {
 	outPath := *out
 	if outPath == "" {
 		outPath = defaultOutput(*in, ".trim")
+	}
+	if same, err := clone.SameFile(*in, outPath); err != nil {
+		fmt.Fprintf(os.Stderr, "trim: %v\n", err)
+		return 1
+	} else if same {
+		fmt.Fprintln(os.Stderr, "trim: -out is the same file as -in; pick a different path or use -in-place")
+		return 1
 	}
 	if _, err := os.Stat(outPath); err == nil {
 		if !*force {

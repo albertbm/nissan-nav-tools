@@ -66,6 +66,11 @@ func detectAppVersion(in string) appVersion {
 
 // anonymizeCopy clones in to out and anonymizes the copy; in is never opened for writing.
 func anonymizeCopy(in, out string, log func(string)) error {
+	if same, err := clone.SameFile(in, out); err != nil {
+		return err
+	} else if same {
+		return fmt.Errorf("output is the same file as the input; pick a different path")
+	}
 	if _, err := os.Stat(out); err == nil {
 		if err := os.Remove(out); err != nil {
 			return err
@@ -203,6 +208,11 @@ func patchInPlaceFile(path string, selected []int, log func(string)) error {
 }
 
 func backupCopy(src, dst string, log func(string)) error {
+	if same, err := clone.SameFile(src, dst); err != nil {
+		return err
+	} else if same {
+		return fmt.Errorf("output is the same file as the input; pick a different path")
+	}
 	log(fmt.Sprintf("Backing up to %s...", dst))
 	if _, err := os.Stat(dst); err == nil {
 		if err := os.Remove(dst); err != nil {
@@ -314,6 +324,11 @@ func applyCardPatch(d disk.Info, ranges []disk.Range, log func(string)) error {
 func patchJob(in, out string, selected []int, onCopyProgress func(int64), log func(string)) error {
 	if len(selected) == 0 {
 		return fmt.Errorf("no patch selected")
+	}
+	if same, err := clone.SameFile(in, out); err != nil {
+		return err
+	} else if same {
+		return fmt.Errorf("output is the same file as the input; pick a different path")
 	}
 	if _, err := os.Stat(out); err == nil {
 		if err := os.Remove(out); err != nil {

@@ -10,13 +10,28 @@ import (
 	"nissan-nav-tools/internal/progress"
 )
 
-// Copy tries an APFS clone on macOS and falls back to a plain byte copy.
+func SameFile(a, b string) (bool, error) {
+	ai, err := os.Stat(a)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	bi, err := os.Stat(b)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return os.SameFile(ai, bi), nil
+}
+
 func Copy(src, dst string) error {
 	return CopyWithProgress(src, dst, nil)
 }
 
-// CopyWithProgress is Copy, reporting bytes written through onProgress; an
-// APFS clone finishes before there's anything to report, so it just reports the total done.
 func CopyWithProgress(src, dst string, onProgress func(int64)) error {
 	if runtime.GOOS == "darwin" {
 		if err := exec.Command("cp", "-c", src, dst).Run(); err == nil {
