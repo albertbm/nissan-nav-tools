@@ -16,7 +16,7 @@ func TestPatchJobCleansUpOnFailure(t *testing.T) {
 	}
 
 	var logged []string
-	err := patchJob(in, out, []int{0}, func(s string) { logged = append(logged, s) })
+	err := patchJob(in, out, []int{0}, nil, func(s string) { logged = append(logged, s) })
 	if err == nil {
 		t.Fatal("patchJob patched a file with no nav image in it")
 	}
@@ -32,7 +32,7 @@ func TestPatchJobRefusesWithNothingSelected(t *testing.T) {
 	dir := t.TempDir()
 	in := filepath.Join(dir, "in.img")
 	os.WriteFile(in, []byte("x"), 0o644)
-	if err := patchJob(in, filepath.Join(dir, "out.img"), nil, func(string) {}); err == nil {
+	if err := patchJob(in, filepath.Join(dir, "out.img"), nil, nil, func(string) {}); err == nil {
 		t.Fatal("patchJob ran with no row selected")
 	}
 }

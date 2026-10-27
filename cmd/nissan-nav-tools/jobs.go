@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"nissan-nav-tools/anonymize"
 	"nissan-nav-tools/consent"
 	"nissan-nav-tools/internal/clone"
 	"nissan-nav-tools/internal/disk"
 	"nissan-nav-tools/internal/humansize"
+	"nissan-nav-tools/internal/progress"
 	"nissan-nav-tools/trim"
 )
 
@@ -149,7 +151,8 @@ func backupJob(d disk.Info, out string, target int64, onProgress func(int64), lo
 	return fi.Size(), nil
 }
 
-func logHash(path string, want bool, log func(string)) error {
+// logHash hashes path, reporting progress through onProgress if it's non-nil.
+func logHash(path string, want bool, onProgress func(int64), log func(string)) error {
 	if !want {
 		return nil
 	}
@@ -159,11 +162,21 @@ func logHash(path string, want bool, log func(string)) error {
 		return err
 	}
 	defer f.Close()
+	start := time.Now()
+	size, err := fileSize(f)
+	if err != nil {
+		return err
+	}
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
+	var r io.Reader = f
+	if onProgress != nil {
+		r = progress.NewCountingReader(f, onProgress)
+	}
+	if _, err := io.Copy(h, r); err != nil {
 		return err
 	}
 	log("SHA-256: " + hex.EncodeToString(h.Sum(nil)))
+	log(progress.Summary(time.Since(start), size))
 	return nil
 }
 
@@ -241,7 +254,8 @@ func planCardPatch(r io.ReaderAt, limit int64, selected []int, log func(string))
 }
 
 // Reads straight off the device, no scratch copy of the card; the caller must unmount d first.
-func planCardPatchDevice(d disk.Info, selected []int, log func(string)) ([]disk.Range, error) {
+// onProgress, if non-nil, is called with the read's high-water mark as the signature scan advances.
+func planCardPatchDevice(d disk.Info, selected []int, onProgress func(int64), log func(string)) ([]disk.Range, error) {
 	f, err := disk.OpenRaw(d, false)
 	if err != nil {
 		return nil, err
@@ -254,7 +268,17 @@ func planCardPatchDevice(d disk.Info, selected []int, log func(string)) ([]disk.
 	}
 	log(fmt.Sprintf("Nav image area is the first %s of the card", humansize.Format(limit)))
 
-	return planCardPatch(disk.NewBufferedReaderAt(f), limit, selected, log)
+	start := time.Now()
+	var r io.ReaderAt = disk.NewBufferedReaderAt(f)
+	if onProgress != nil {
+		r = progress.NewCountingReaderAt(r, onProgress)
+	}
+	ranges, err := planCardPatch(r, limit, selected, log)
+	if err != nil {
+		return nil, err
+	}
+	log(progress.Summary(time.Since(start), limit))
+	return ranges, nil
 }
 
 // Unmounts again right before writing: the card could have remounted while the confirmation dialog was up.
@@ -287,7 +311,7 @@ func applyCardPatch(d disk.Info, ranges []disk.Range, log func(string)) error {
 
 // patchJob clones in to out and runs the chosen rows in order; out is
 // removed again if any row fails, so a half-patched file never sits there.
-func patchJob(in, out string, selected []int, log func(string)) error {
+func patchJob(in, out string, selected []int, onCopyProgress func(int64), log func(string)) error {
 	if len(selected) == 0 {
 		return fmt.Errorf("no patch selected")
 	}
@@ -296,8 +320,12 @@ func patchJob(in, out string, selected []int, log func(string)) error {
 			return err
 		}
 	}
-	if err := clone.Copy(in, out); err != nil {
+	copyStart := time.Now()
+	if err := clone.CopyWithProgress(in, out, onCopyProgress); err != nil {
 		return fmt.Errorf("copying %s to %s: %w", in, out, err)
+	}
+	if fi, err := os.Stat(out); err == nil {
+		log(progress.Summary(time.Since(copyStart), fi.Size()))
 	}
 	done := false
 	defer func() {

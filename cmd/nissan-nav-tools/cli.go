@@ -7,14 +7,43 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"nissan-nav-tools/anonymize"
 	"nissan-nav-tools/consent"
 	"nissan-nav-tools/internal/clone"
 	"nissan-nav-tools/internal/disk"
 	"nissan-nav-tools/internal/humansize"
+	"nissan-nav-tools/internal/progress"
 	"nissan-nav-tools/trim"
 )
+
+// isTerminal is a minimal check, good enough to decide between a \r-overwritten
+// line and one print per call; a stub file in stdout's place just loses the carriage returns.
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
+
+// cliProgress prints an overwriting progress line on a terminal, or nothing
+// in between (the final summary line still runs) when stdout isn't one.
+func cliProgress(total int64) func(int64) {
+	tr := progress.New(total)
+	tty := isTerminal(os.Stdout)
+	return func(done int64) {
+		st := tr.Update(done)
+		if tty {
+			fmt.Printf("\r%s", st.Line())
+		}
+	}
+}
+
+func cliProgressDone(start time.Time, totalBytes int64) {
+	if isTerminal(os.Stdout) {
+		fmt.Println()
+	}
+	fmt.Println(progress.Summary(time.Since(start), totalBytes))
+}
 
 // prepareTarget is in itself if inPlace, else a clone of in at out; in is never opened for writing.
 func prepareTarget(in, out, suffix string, inPlace, force bool) (path string, err error) {
@@ -204,15 +233,19 @@ func runRestoreCLI(args []string) int {
 	}
 
 	log := func(s string) { fmt.Println(s) }
-	if err := restoreJob(d, *in, nil, log); err != nil {
+	writeStart := time.Now()
+	if err := restoreJob(d, *in, cliProgress(fi.Size()), log); err != nil {
 		fmt.Fprintf(os.Stderr, "restore: %v\n", err)
 		return 1
 	}
+	cliProgressDone(writeStart, fi.Size())
 	if *verify {
-		if err := verifyRestore(d, *in, log); err != nil {
+		verifyStart := time.Now()
+		if err := verifyRestore(d, *in, cliProgress(fi.Size()), log); err != nil {
 			fmt.Fprintf(os.Stderr, "restore: %v\n", err)
 			return 1
 		}
+		cliProgressDone(verifyStart, fi.Size())
 	}
 	fmt.Printf("restored %s onto %s\n", *in, d.Identifier)
 	return 0
@@ -279,17 +312,19 @@ func runTrimCLI(args []string) int {
 			return 1
 		}
 	}
-	if err := copyTrimmed(*in, outPath, target); err != nil {
+	start := time.Now()
+	if err := copyTrimmed(*in, outPath, target, cliProgress(target)); err != nil {
 		fmt.Fprintf(os.Stderr, "trim: %v\n", err)
 		return 1
 	}
+	cliProgressDone(start, target)
 	fmt.Printf("%s written from %s: %s -> %s, %s skipped\n",
 		outPath, *in, humansize.Format(fullSize), humansize.Format(target), humansize.Format(skipped))
 	return 0
 }
 
 // copyTrimmed copies only the first n bytes, so it never reads the discarded tail.
-func copyTrimmed(src, dst string, n int64) error {
+func copyTrimmed(src, dst string, n int64, onProgress func(int64)) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
@@ -299,7 +334,11 @@ func copyTrimmed(src, dst string, n int64) error {
 	if err != nil {
 		return err
 	}
-	if _, err := io.CopyN(out, in, n); err != nil {
+	var r io.Reader = in
+	if onProgress != nil {
+		r = progress.NewCountingReader(in, onProgress)
+	}
+	if _, err := io.CopyN(out, r, n); err != nil {
 		out.Close()
 		os.Remove(dst)
 		return err

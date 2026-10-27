@@ -12,8 +12,6 @@ import (
 	"nissan-nav-tools/internal/humansize"
 )
 
-// newBackupTab reads a physical card straight to a raw image file. It never
-// anonymizes; that's its own tab now.
 func newBackupTab(w fyne.Window) fyne.CanvasObject {
 	logView, appendLog, clearLog := newLog()
 	status := widget.NewLabel("Pick a card to back up.")
@@ -70,6 +68,8 @@ func newBackupTab(w fyne.Window) fyne.CanvasObject {
 
 	progress := widget.NewProgressBar()
 	progress.Hide()
+	speedLabel := widget.NewLabel("")
+	speedLabel.Hide()
 
 	var runBtn *widget.Button
 	runBtn = widget.NewButton("Back up", func() {
@@ -89,24 +89,25 @@ func newBackupTab(w fyne.Window) fyne.CanvasObject {
 		progress.Show()
 		status.SetText("Reading the card...")
 		go func() {
-			defer fyne.Do(func() { runBtn.Enable(); progress.Hide() })
+			defer fyne.Do(func() { runBtn.Enable(); progress.Hide(); speedLabel.Hide() })
 			target := trimTarget(d, trimCheck.Checked, appendLog)
 			total := d.Size
 			if target > 0 {
 				total = target
 			}
-			onProgress := func(written int64) {
-				if total > 0 {
-					fyne.Do(func() { progress.SetValue(float64(written) / float64(total)) })
-				}
-			}
-			size, err := backupJob(d, outPath, target, onProgress, appendLog)
+			st := newSpeedTracker(total, progress, speedLabel)
+			size, err := backupJob(d, outPath, target, st.onProgress, appendLog)
 			if err != nil {
 				fyne.Do(func() { status.SetText("Failed: " + err.Error()) })
 				return
 			}
 			appendLog(fmt.Sprintf("%s written, %s", outPath, humansize.Format(size)))
-			if err := logHash(outPath, hashCheck.Checked, appendLog); err != nil {
+			appendLog(st.finish(size))
+			var hashProgress func(int64)
+			if hashCheck.Checked {
+				hashProgress = newSpeedTracker(size, progress, speedLabel).onProgress
+			}
+			if err := logHash(outPath, hashCheck.Checked, hashProgress, appendLog); err != nil {
 				fyne.Do(func() { status.SetText("Failed: " + err.Error()) })
 				return
 			}
@@ -123,6 +124,7 @@ func newBackupTab(w fyne.Window) fyne.CanvasObject {
 		hashCheck,
 		runBtn,
 		progress,
+		speedLabel,
 		status,
 		logView,
 	)

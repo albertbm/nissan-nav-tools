@@ -48,7 +48,7 @@ func restoreJob(d disk.Info, imgPath string, onProgress func(int64), log func(st
 	return nil
 }
 
-func verifyRestore(d disk.Info, imgPath string, log func(string)) error {
+func verifyRestore(d disk.Info, imgPath string, onProgress func(int64), log func(string)) error {
 	fi, err := os.Stat(imgPath)
 	if err != nil {
 		return err
@@ -65,7 +65,7 @@ func verifyRestore(d disk.Info, imgPath string, log func(string)) error {
 	defer os.Remove(scratch)
 
 	log("Reading back...")
-	if err := disk.ReadRaw(d, scratch, fi.Size(), nil); err != nil {
+	if err := disk.ReadRaw(d, scratch, fi.Size(), onProgress); err != nil {
 		return fmt.Errorf("reading the card back: %w", err)
 	}
 	gotHash, err := fileSHA256(scratch)

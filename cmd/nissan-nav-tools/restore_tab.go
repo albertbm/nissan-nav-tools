@@ -118,6 +118,8 @@ func newRestoreTab(w fyne.Window) fyne.CanvasObject {
 
 	progress := widget.NewProgressBar()
 	progress.Hide()
+	speedLabel := widget.NewLabel("")
+	speedLabel.Hide()
 
 	var runBtn *widget.Button
 	runBtn = widget.NewButton("Restore", func() {
@@ -144,7 +146,7 @@ func newRestoreTab(w fyne.Window) fyne.CanvasObject {
 		progress.SetValue(0)
 		status.SetText("Confirming...")
 		go func() {
-			defer fyne.Do(func() { runBtn.Enable() })
+			defer fyne.Do(func() { runBtn.Enable(); progress.Hide(); speedLabel.Hide() })
 
 			backupFirst, proceed := confirmRestore(d.Identifier, inPath)
 			if !proceed {
@@ -170,24 +172,23 @@ func newRestoreTab(w fyne.Window) fyne.CanvasObject {
 				}
 			}
 
-			fyne.Do(func() { progress.Show(); status.SetText("Restoring...") })
-			onProgress := func(written int64) {
-				if imgSize > 0 {
-					fyne.Do(func() { progress.SetValue(float64(written) / float64(imgSize)) })
-				}
-			}
-			if err := restoreJob(d, inPath, onProgress, appendLog); err != nil {
+			fyne.Do(func() { status.SetText("Restoring...") })
+			writeTracker := newSpeedTracker(imgSize, progress, speedLabel)
+			if err := restoreJob(d, inPath, writeTracker.onProgress, appendLog); err != nil {
 				fyne.Do(func() { status.SetText("Failed: " + err.Error()) })
 				return
 			}
 			fyne.Do(func() { progress.SetValue(1) })
+			appendLog(writeTracker.finish(imgSize))
 
 			if verifyCheck.Checked {
 				fyne.Do(func() { status.SetText("Verifying...") })
-				if err := verifyRestore(d, inPath, appendLog); err != nil {
+				verifyTracker := newSpeedTracker(imgSize, progress, speedLabel)
+				if err := verifyRestore(d, inPath, verifyTracker.onProgress, appendLog); err != nil {
 					fyne.Do(func() { status.SetText("Failed: " + err.Error()) })
 					return
 				}
+				appendLog(verifyTracker.finish(imgSize))
 			}
 			fyne.Do(func() { status.SetText("Done: " + d.Identifier) })
 		}()
@@ -204,6 +205,7 @@ func newRestoreTab(w fyne.Window) fyne.CanvasObject {
 		verifyCheck,
 		runBtn,
 		progress,
+		speedLabel,
 		status,
 		logView,
 	)

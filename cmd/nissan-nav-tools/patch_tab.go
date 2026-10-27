@@ -12,6 +12,7 @@ import (
 
 	"nissan-nav-tools/internal/disk"
 	"nissan-nav-tools/internal/humansize"
+	"nissan-nav-tools/internal/progress"
 )
 
 func newScratchFile() (string, error) {
@@ -184,6 +185,10 @@ func newPatchTab(w fyne.Window) fyne.CanvasObject {
 
 	spinner := widget.NewProgressBarInfinite()
 	spinner.Hide()
+	copyBar := widget.NewProgressBar()
+	copyBar.Hide()
+	speedLabel := widget.NewLabel("")
+	speedLabel.Hide()
 
 	var runBtn *widget.Button
 	runBtn = widget.NewButton("Run", func() {
@@ -207,7 +212,7 @@ func newPatchTab(w fyne.Window) fyne.CanvasObject {
 			}
 			runCardPatch(disks[diskSelect.SelectedIndex()], selected, runBtn, spinner, status, clearLog, appendLog)
 		default:
-			runCopyPatch(inPath, outEntry, detected, selected, runBtn, spinner, status, clearLog, appendLog)
+			runCopyPatch(inPath, outEntry, detected, selected, runBtn, spinner, copyBar, speedLabel, status, clearLog, appendLog)
 		}
 	})
 	runBtn.Importance = widget.HighImportance
@@ -224,13 +229,16 @@ func newPatchTab(w fyne.Window) fyne.CanvasObject {
 		rowsBox,
 		runBtn,
 		spinner,
+		copyBar,
+		speedLabel,
 		status,
 		logView,
 	)
 }
 
 func runCopyPatch(inPath string, outEntry *widget.Entry, detected appVersion, selected []int,
-	runBtn *widget.Button, spinner *widget.ProgressBarInfinite, status *widget.Label, clearLog func(), appendLog func(string)) {
+	runBtn *widget.Button, spinner *widget.ProgressBarInfinite, copyBar *widget.ProgressBar, speedLabel *widget.Label,
+	status *widget.Label, clearLog func(), appendLog func(string)) {
 	if inPath == "" {
 		status.SetText("Choose an input image first.")
 		return
@@ -250,8 +258,12 @@ func runCopyPatch(inPath string, outEntry *widget.Entry, detected appVersion, se
 	clearLog()
 	status.SetText("Patching...")
 	go func() {
-		defer fyne.Do(func() { runBtn.Enable(); spinner.Hide() })
-		if err := patchJob(inPath, out, selected, appendLog); err != nil {
+		defer fyne.Do(func() { runBtn.Enable(); spinner.Hide(); copyBar.Hide(); speedLabel.Hide() })
+		var copyProgress func(int64)
+		if fi, err := os.Stat(inPath); err == nil {
+			copyProgress = newSpeedTracker(fi.Size(), copyBar, speedLabel).onProgress
+		}
+		if err := patchJob(inPath, out, selected, copyProgress, appendLog); err != nil {
 			fyne.Do(func() { status.SetText("Failed: " + err.Error()) })
 			return
 		}
@@ -354,7 +366,13 @@ func runCardPatch(d disk.Info, selected []int,
 		}
 
 		fyne.Do(func() { status.SetText("Reading the card...") })
-		ranges, err := planCardPatchDevice(d, selected, appendLog)
+		// Total is the nav image size, known only once planCardPatchDevice reads the partition table, not here.
+		tr := progress.New(0)
+		onProgress := func(done int64) {
+			st := tr.Update(done)
+			fyne.Do(func() { status.SetText("Reading the card... " + st.Line()) })
+		}
+		ranges, err := planCardPatchDevice(d, selected, onProgress, appendLog)
 		if err != nil {
 			fyne.Do(func() { status.SetText("Failed: " + err.Error()) })
 			return

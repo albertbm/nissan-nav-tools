@@ -1,13 +1,13 @@
 package main
 
 import (
+	"os"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 )
 
-// newAnonymizeTab zeroes personal data on a copy of an image file. The
-// per-item summary anonymizeCopy logs is the tab's whole report.
 func newAnonymizeTab(w fyne.Window) fyne.CanvasObject {
 	logView, appendLog, clearLog := newLog()
 	status := widget.NewLabel("Pick an image file to anonymize.")
@@ -38,6 +38,10 @@ func newAnonymizeTab(w fyne.Window) fyne.CanvasObject {
 
 	spinner := widget.NewProgressBarInfinite()
 	spinner.Hide()
+	hashBar := widget.NewProgressBar()
+	hashBar.Hide()
+	speedLabel := widget.NewLabel("")
+	speedLabel.Hide()
 
 	var runBtn *widget.Button
 	runBtn = widget.NewButton("Anonymize", func() {
@@ -56,12 +60,20 @@ func newAnonymizeTab(w fyne.Window) fyne.CanvasObject {
 		clearLog()
 		status.SetText("Anonymizing...")
 		go func() {
-			defer fyne.Do(func() { runBtn.Enable(); spinner.Hide() })
+			defer fyne.Do(func() { runBtn.Enable(); spinner.Hide(); hashBar.Hide(); speedLabel.Hide() })
 			if err := anonymizeCopy(inPath, out, appendLog); err != nil {
 				fyne.Do(func() { status.SetText("Failed: " + err.Error()) })
 				return
 			}
-			if err := logHash(out, hashCheck.Checked, appendLog); err != nil {
+			var hashProgress func(int64)
+			if hashCheck.Checked {
+				size := int64(0)
+				if fi, err := os.Stat(out); err == nil {
+					size = fi.Size()
+				}
+				hashProgress = newSpeedTracker(size, hashBar, speedLabel).onProgress
+			}
+			if err := logHash(out, hashCheck.Checked, hashProgress, appendLog); err != nil {
 				fyne.Do(func() { status.SetText("Failed: " + err.Error()) })
 				return
 			}
@@ -77,6 +89,8 @@ func newAnonymizeTab(w fyne.Window) fyne.CanvasObject {
 		hashCheck,
 		runBtn,
 		spinner,
+		hashBar,
+		speedLabel,
 		status,
 		logView,
 	)
