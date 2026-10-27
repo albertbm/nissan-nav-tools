@@ -41,11 +41,32 @@ func restoreJob(d disk.Info, imgPath string, onProgress func(int64), log func(st
 	if err := disk.WriteRaw(d, imgPath, onProgress); err != nil {
 		return fmt.Errorf("writing the card: %w", err)
 	}
-	log(fmt.Sprintf("Ejecting %s...", d.Identifier))
-	if err := disk.Eject(d.Identifier); err != nil {
+	return nil
+}
+
+// ejectCard is its own step so callers eject only once the card is done
+// with, verify included: ejecting first can pull the device node a
+// read-back needs.
+func ejectCard(id string, log func(string)) error {
+	log(fmt.Sprintf("Ejecting %s...", id))
+	if err := disk.Eject(id); err != nil {
 		return fmt.Errorf("eject: %w", err)
 	}
 	return nil
+}
+
+// restoreSequence is the order a restore has to run in: write, verify if
+// asked, eject last. A failed write or verify skips the eject.
+func restoreSequence(write, verify func() error, verifyWanted bool, eject func() error) error {
+	if err := write(); err != nil {
+		return err
+	}
+	if verifyWanted {
+		if err := verify(); err != nil {
+			return err
+		}
+	}
+	return eject()
 }
 
 func verifyRestore(d disk.Info, imgPath string, onProgress func(int64), log func(string)) error {

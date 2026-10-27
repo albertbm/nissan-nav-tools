@@ -173,22 +173,31 @@ func newRestoreTab(w fyne.Window) fyne.CanvasObject {
 			}
 
 			fyne.Do(func() { status.SetText("Restoring...") })
-			writeTracker := newSpeedTracker(imgSize, progress, speedLabel)
-			if err := restoreJob(d, inPath, writeTracker.onProgress, appendLog); err != nil {
+			err := restoreSequence(
+				func() error {
+					writeTracker := newSpeedTracker(imgSize, progress, speedLabel)
+					if err := restoreJob(d, inPath, writeTracker.onProgress, appendLog); err != nil {
+						return err
+					}
+					fyne.Do(func() { progress.SetValue(1) })
+					appendLog(writeTracker.finish(imgSize))
+					return nil
+				},
+				func() error {
+					fyne.Do(func() { status.SetText("Verifying...") })
+					verifyTracker := newSpeedTracker(imgSize, progress, speedLabel)
+					if err := verifyRestore(d, inPath, verifyTracker.onProgress, appendLog); err != nil {
+						return err
+					}
+					appendLog(verifyTracker.finish(imgSize))
+					return nil
+				},
+				verifyCheck.Checked,
+				func() error { return ejectCard(d.Identifier, appendLog) },
+			)
+			if err != nil {
 				fyne.Do(func() { status.SetText("Failed: " + err.Error()) })
 				return
-			}
-			fyne.Do(func() { progress.SetValue(1) })
-			appendLog(writeTracker.finish(imgSize))
-
-			if verifyCheck.Checked {
-				fyne.Do(func() { status.SetText("Verifying...") })
-				verifyTracker := newSpeedTracker(imgSize, progress, speedLabel)
-				if err := verifyRestore(d, inPath, verifyTracker.onProgress, appendLog); err != nil {
-					fyne.Do(func() { status.SetText("Failed: " + err.Error()) })
-					return
-				}
-				appendLog(verifyTracker.finish(imgSize))
 			}
 			fyne.Do(func() { status.SetText("Done: " + d.Identifier) })
 		}()

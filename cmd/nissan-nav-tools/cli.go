@@ -238,19 +238,29 @@ func runRestoreCLI(args []string) int {
 	}
 
 	log := func(s string) { fmt.Println(s) }
-	writeStart := time.Now()
-	if err := restoreJob(d, *in, cliProgress(fi.Size()), log); err != nil {
+	err = restoreSequence(
+		func() error {
+			start := time.Now()
+			if err := restoreJob(d, *in, cliProgress(fi.Size()), log); err != nil {
+				return err
+			}
+			cliProgressDone(start, fi.Size())
+			return nil
+		},
+		func() error {
+			start := time.Now()
+			if err := verifyRestore(d, *in, cliProgress(fi.Size()), log); err != nil {
+				return err
+			}
+			cliProgressDone(start, fi.Size())
+			return nil
+		},
+		*verify,
+		func() error { return ejectCard(d.Identifier, log) },
+	)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "restore: %v\n", err)
 		return 1
-	}
-	cliProgressDone(writeStart, fi.Size())
-	if *verify {
-		verifyStart := time.Now()
-		if err := verifyRestore(d, *in, cliProgress(fi.Size()), log); err != nil {
-			fmt.Fprintf(os.Stderr, "restore: %v\n", err)
-			return 1
-		}
-		cliProgressDone(verifyStart, fi.Size())
 	}
 	fmt.Printf("restored %s onto %s\n", *in, d.Identifier)
 	return 0
