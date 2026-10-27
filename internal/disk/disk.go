@@ -2,6 +2,8 @@
 package disk
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -157,6 +159,27 @@ func ReadRaw(id Info, outPath string, maxBytes int64, onProgress func(written in
 		r = io.LimitReader(src, maxBytes)
 	}
 	return copyChunks(out, r, onProgress, false)
+}
+
+// HashRaw reads the first n bytes of id's raw device and returns their
+// sha256, hashing the stream directly instead of staging it to a file.
+func HashRaw(id Info, n int64, onProgress func(written int64)) (string, error) {
+	src, err := OpenRaw(id, false)
+	if err != nil {
+		return "", err
+	}
+	defer src.Close()
+	return hashStream(src, n, onProgress)
+}
+
+// hashStream is HashRaw's body, split out so it can run against a plain
+// reader in tests instead of a real device.
+func hashStream(r io.Reader, n int64, onProgress func(written int64)) (string, error) {
+	h := sha256.New()
+	if err := copyChunks(h, io.LimitReader(r, n), onProgress, false); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func WriteRaw(id Info, srcPath string, onProgress func(written int64)) error {

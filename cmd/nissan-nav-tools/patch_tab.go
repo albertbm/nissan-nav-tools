@@ -15,16 +15,6 @@ import (
 	"nissan-nav-tools/internal/progress"
 )
 
-func newScratchFile() (string, error) {
-	f, err := os.CreateTemp("", "nnt-card-*.img")
-	if err != nil {
-		return "", err
-	}
-	path := f.Name()
-	f.Close()
-	return path, nil
-}
-
 const (
 	targetCopyLabel = "Copy"
 	targetFileLabel = "This image file"
@@ -69,7 +59,6 @@ func confirmInPlace(what string) (backupFirst, proceed bool) {
 	}
 }
 
-// newPatchTab refuses app versions with no patch.
 func newPatchTab(w fyne.Window) fyne.CanvasObject {
 	logView, appendLog, clearLog := newLog()
 	status := widget.NewLabel("Pick an image file to patch.")
@@ -366,7 +355,6 @@ func runCardPatch(d disk.Info, selected []int,
 		}
 
 		fyne.Do(func() { status.SetText("Reading the card...") })
-		// Total is the nav image size, known only once planCardPatchDevice reads the partition table, not here.
 		tr := progress.New(0)
 		onProgress := func(done int64) {
 			st := tr.Update(done)

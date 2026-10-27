@@ -1,6 +1,11 @@
 package disk
 
-import "testing"
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"testing"
+)
 
 func TestPadToSectorLeavesAlignedDataAlone(t *testing.T) {
 	buf := make([]byte, sectorBytes*3)
@@ -65,5 +70,35 @@ func TestIsCard(t *testing.T) {
 		if got := isCard(c.d); got != c.want {
 			t.Errorf("isCard(%+v) = %v, want %v", c.d, got, c.want)
 		}
+	}
+}
+
+func TestHashStreamMatchesSHA256(t *testing.T) {
+	data := bytes.Repeat([]byte("card"), 10000) // bigger than one copyChunks buffer isn't required to prove it, but cheap
+	want := sha256.Sum256(data)
+
+	var progressed int64
+	got, err := hashStream(bytes.NewReader(data), int64(len(data)), func(n int64) { progressed = n })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != hex.EncodeToString(want[:]) {
+		t.Errorf("got %s, want %s", got, hex.EncodeToString(want[:]))
+	}
+	if progressed != int64(len(data)) {
+		t.Errorf("progress reported %d, want %d", progressed, len(data))
+	}
+}
+
+func TestHashStreamStopsAtN(t *testing.T) {
+	data := bytes.Repeat([]byte("x"), 100)
+	want := sha256.Sum256(data[:40])
+
+	got, err := hashStream(bytes.NewReader(data), 40, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != hex.EncodeToString(want[:]) {
+		t.Errorf("got %s, want the hash of the first 40 bytes only", got)
 	}
 }

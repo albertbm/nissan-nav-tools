@@ -11,7 +11,6 @@ import (
 	"nissan-nav-tools/internal/humansize"
 )
 
-// refuseIfTooSmall stops a restore before anything is unmounted or written.
 func refuseIfTooSmall(d disk.Info, imgSize int64) error {
 	if d.Size < imgSize {
 		return fmt.Errorf("%s (%s) is smaller than the image (%s)", d.Identifier, humansize.Format(d.Size), humansize.Format(imgSize))
@@ -44,9 +43,7 @@ func restoreJob(d disk.Info, imgPath string, onProgress func(int64), log func(st
 	return nil
 }
 
-// ejectCard is its own step so callers eject only once the card is done
-// with, verify included: ejecting first can pull the device node a
-// read-back needs.
+// ejectCard is its own step: ejecting before a read-back verify can pull the device node that verify needs.
 func ejectCard(id string, log func(string)) error {
 	log(fmt.Sprintf("Ejecting %s...", id))
 	if err := disk.Eject(id); err != nil {
@@ -55,8 +52,7 @@ func ejectCard(id string, log func(string)) error {
 	return nil
 }
 
-// restoreSequence is the order a restore has to run in: write, verify if
-// asked, eject last. A failed write or verify skips the eject.
+// restoreSequence runs write, then verify if asked, then eject; a failed write or verify skips the eject.
 func restoreSequence(write, verify func() error, verifyWanted bool, eject func() error) error {
 	if err := write(); err != nil {
 		return err
@@ -79,19 +75,10 @@ func verifyRestore(d disk.Info, imgPath string, onProgress func(int64), log func
 		return err
 	}
 
-	scratch, err := newScratchFile()
-	if err != nil {
-		return err
-	}
-	defer os.Remove(scratch)
-
 	log("Reading back...")
-	if err := disk.ReadRaw(d, scratch, fi.Size(), onProgress); err != nil {
-		return fmt.Errorf("reading the card back: %w", err)
-	}
-	gotHash, err := fileSHA256(scratch)
+	gotHash, err := disk.HashRaw(d, fi.Size(), onProgress)
 	if err != nil {
-		return err
+		return fmt.Errorf("reading the card back: %w", err)
 	}
 	if gotHash != wantHash {
 		return fmt.Errorf("verify failed: card sha256 %s, image sha256 %s", gotHash, wantHash)
