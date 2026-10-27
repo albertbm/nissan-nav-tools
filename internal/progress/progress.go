@@ -1,4 +1,4 @@
-// Package progress turns a running byte count into a smoothed speed and an ETA.
+// Package progress tracks speed and time left.
 package progress
 
 import (
@@ -8,7 +8,9 @@ import (
 )
 
 const settleWindow = 2 * time.Second
-const emaAlpha = 0.35
+
+// Cards write in bursts; average the last 30 s.
+const rateWindow = 30 * time.Second
 
 type Stats struct {
 	Done     int64
@@ -20,18 +22,20 @@ type Stats struct {
 	HasETA   bool
 }
 
+type sample struct {
+	at   time.Time
+	done int64
+}
+
 type Tracker struct {
 	total   int64
 	start   time.Time
-	last    time.Time
-	lastN   int64
-	rate    float64
-	hasRate bool
+	samples []sample
 }
 
 func New(total int64) *Tracker {
 	now := time.Now()
-	return &Tracker{total: total, start: now, last: now}
+	return &Tracker{total: total, start: now, samples: []sample{{now, 0}}}
 }
 
 func (t *Tracker) Update(done int64) Stats {
@@ -39,33 +43,35 @@ func (t *Tracker) Update(done int64) Stats {
 }
 
 func (t *Tracker) at(done int64, now time.Time) Stats {
-	if dt := now.Sub(t.last).Seconds(); dt > 0 && done > t.lastN {
-		sample := float64(done-t.lastN) / dt
-		if !t.hasRate {
-			t.rate, t.hasRate = sample, true
-		} else {
-			t.rate = emaAlpha*sample + (1-emaAlpha)*t.rate
-		}
-		t.last, t.lastN = now, done
+	if last := t.samples[len(t.samples)-1]; now.Sub(last.at) >= 250*time.Millisecond {
+		t.samples = append(t.samples, sample{now, done})
 	}
-
+	for len(t.samples) > 2 && now.Sub(t.samples[1].at) >= rateWindow {
+		t.samples = t.samples[1:]
+	}
 	elapsed := now.Sub(t.start)
 	st := Stats{Done: done, Total: t.total, Elapsed: elapsed}
-	if !t.hasRate || elapsed < settleWindow {
+	first := t.samples[0]
+	dt := now.Sub(first.at).Seconds()
+	if elapsed < settleWindow || dt <= 0 {
 		return st
 	}
-	st.Speed, st.HasSpeed = t.rate, true
-	if t.total > 0 && t.rate > 0 {
+	rate := float64(done-first.done) / dt
+	if rate <= 0 {
+		return st
+	}
+	st.Speed, st.HasSpeed = rate, true
+	if t.total > 0 {
 		remaining := float64(t.total - done)
 		if remaining < 0 {
 			remaining = 0
 		}
-		st.ETA, st.HasETA = time.Duration(remaining/t.rate*float64(time.Second)), true
+		st.ETA, st.HasETA = time.Duration(remaining/rate*float64(time.Second)), true
 	}
 	return st
 }
 
-// FormatSpeed renders bytes/sec as MB/s (10^6), matching how card makers rate speed.
+// MB/s (10^6), as card makers rate speed.
 func FormatSpeed(bytesPerSec float64) string {
 	return fmt.Sprintf("%.1f MB/s", bytesPerSec/1e6)
 }
@@ -130,7 +136,7 @@ func (c *CountingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// CountingReaderAt wraps a ReaderAt read out of order, reporting the high-water mark rather than a raw byte count.
+// Reads arrive out of order, so report the high-water mark.
 type CountingReaderAt struct {
 	r          io.ReaderAt
 	high       int64

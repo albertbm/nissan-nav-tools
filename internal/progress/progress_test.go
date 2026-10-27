@@ -26,17 +26,18 @@ func TestSteadyRate(t *testing.T) {
 	}
 }
 
-func TestBurstThenStall(t *testing.T) {
+func TestSpeedFollowsTheLast30Seconds(t *testing.T) {
 	tr := New(0)
 	start := time.Now()
-	st := tr.at(50_000_000, start.Add(3*time.Second))
-	if !st.HasSpeed {
-		t.Fatalf("expected a speed after the burst")
+	var st Stats
+	for i := int64(1); i <= 60; i++ { // 10 MB/s for a minute
+		st = tr.at(i*10_000_000, start.Add(time.Duration(i)*time.Second))
 	}
-	burstSpeed := st.Speed
-	st = tr.at(50_000_000, start.Add(30*time.Second))
-	if st.Speed != burstSpeed {
-		t.Fatalf("a stall with no new bytes changed the rate: %v -> %v", burstSpeed, st.Speed)
+	for i := int64(1); i <= 40; i++ { // then 2 MB/s
+		st = tr.at(600_000_000+i*2_000_000, start.Add(time.Duration(60+i)*time.Second))
+	}
+	if got := st.Speed; got < 1_900_000 || got > 2_100_000 {
+		t.Fatalf("speed = %v, want about 2,000,000 B/s", got)
 	}
 }
 
