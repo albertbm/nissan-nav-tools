@@ -8,17 +8,18 @@ import (
 
 type exfatVol struct {
 	f    ReadWriterAt
-	base int64 // bytes, volume start on the image
+	base int64
 
-	fatOffset  int64 // sectors from base
+	fatOffset  int64
 	fatLength  int64
-	heapOffset int64 // sectors from base
+	heapOffset int64
 	rootFirst  uint32
 
 	sectorSize   int64
-	spc          int64 // sectors per cluster
+	spc          int64
 	clusterBytes int64
 	activeFat    int64
+	clusterCount uint32
 }
 
 func openExfat(f ReadWriterAt, lba int64) (*exfatVol, error) {
@@ -34,6 +35,7 @@ func openExfat(f ReadWriterAt, lba int64) (*exfatVol, error) {
 	v.fatOffset = int64(le32(b[0x50:0x54]))
 	v.fatLength = int64(le32(b[0x54:0x58]))
 	v.heapOffset = int64(le32(b[0x58:0x5c]))
+	v.clusterCount = le32(b[0x5c:0x60])
 	v.rootFirst = le32(b[0x60:0x64])
 	flags := le16(b[0x6a:0x6c])
 	v.sectorSize = 1 << b[0x6c]
@@ -56,7 +58,6 @@ func (v *exfatVol) fatNext(c uint32) uint32 {
 	return le32(b)
 }
 
-// chain lists a file's clusters; noFat means they run contiguous from first instead of being FAT-linked.
 func (v *exfatVol) chain(first uint32, noFat bool, size uint64) []uint32 {
 	if first < 2 {
 		return nil
@@ -251,4 +252,64 @@ func (v *exfatVol) zero(f ReadWriterAt, m matched) error {
 		}
 	}
 	return nil
+}
+
+// readBitmap returns the active FAT's type-0x81 Allocation Bitmap entry, one bit per cluster.
+func (v *exfatVol) readBitmap() ([]byte, error) {
+	for _, c := range v.chain(v.rootFirst, false, 0) {
+		buf := make([]byte, v.clusterBytes)
+		if _, err := v.f.ReadAt(buf, v.clusterOffset(c)); err != nil {
+			return nil, err
+		}
+		for off := 0; off+32 <= len(buf); off += 32 {
+			e := buf[off : off+32]
+			if e[0] == 0x00 {
+				return nil, fmt.Errorf("no allocation bitmap entry in the root directory")
+			}
+			if e[0] != 0x81 || int64(e[1]&1) != v.activeFat {
+				continue
+			}
+			first := le32(e[0x14:0x18])
+			size := int64(le64(e[0x18:0x20]))
+			bits := make([]byte, size)
+			var read int64
+			for _, bc := range v.chain(first, false, uint64(size)) {
+				cbuf := make([]byte, v.clusterBytes)
+				if _, err := v.f.ReadAt(cbuf, v.clusterOffset(bc)); err != nil {
+					return nil, err
+				}
+				n := v.clusterBytes
+				if read+n > size {
+					n = size - read
+				}
+				copy(bits[read:read+n], cbuf[:n])
+				read += n
+			}
+			return bits, nil
+		}
+	}
+	return nil, fmt.Errorf("no allocation bitmap entry in the root directory")
+}
+
+func (v *exfatVol) zeroFreeClusters(f ReadWriterAt) (clusters, bytesZeroed int64, err error) {
+	bits, err := v.readBitmap()
+	if err != nil {
+		return 0, 0, err
+	}
+	blank := make([]byte, v.clusterBytes)
+	for c := uint32(2); c < v.clusterCount+2; c++ {
+		bit := c - 2
+		if int(bit/8) >= len(bits) {
+			break
+		}
+		if bits[bit/8]>>(bit%8)&1 != 0 {
+			continue
+		}
+		if _, err := f.WriteAt(blank, v.clusterOffset(c)); err != nil {
+			return clusters, bytesZeroed, err
+		}
+		clusters++
+		bytesZeroed += v.clusterBytes
+	}
+	return clusters, bytesZeroed, nil
 }

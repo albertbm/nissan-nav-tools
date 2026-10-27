@@ -18,7 +18,6 @@ import (
 	"nissan-nav-tools/trim"
 )
 
-// patchRow is one listed patch; a new one is just a new entry here.
 type patchRow struct {
 	title string
 	apply func(f consent.ReadWriterAt, size int64, log func(string)) (string, error)
@@ -40,7 +39,6 @@ var patchRows = []patchRow{
 	},
 }
 
-// appVersion is cached so Run can refuse without touching the disk again.
 type appVersion struct {
 	name      string
 	supported bool
@@ -64,7 +62,6 @@ func detectAppVersion(in string) appVersion {
 	return appVersion{name: t.Build, supported: consent.Supported(t.Build)}
 }
 
-// anonymizeCopy clones in to out and anonymizes the copy; in is never opened for writing.
 func anonymizeCopy(in, out string, log func(string)) error {
 	if same, err := clone.SameFile(in, out); err != nil {
 		return err
@@ -100,6 +97,11 @@ func anonymizeCopy(in, out string, log func(string)) error {
 	for _, it := range rep.Items {
 		log(fmt.Sprintf("  %-45s %-40s %8s", it.Path, it.What, humansize.Format(it.Size)))
 	}
+	if rep.CWSPartitions > 0 {
+		log(fmt.Sprintf("  %-45s %-40s %8s (%d cluster(s))",
+			"<free space on the CWS partition(s)>", "old deleted/rewritten file residue",
+			humansize.Format(rep.FreeBytesZeroed), rep.FreeClusters))
+	}
 	if rep.FrontGapFound {
 		log(fmt.Sprintf("  %-45s %-40s %8s (%d markers seen)",
 			"<front gap settings area>", "unit-written state, layout undecoded",
@@ -110,9 +112,6 @@ func anonymizeCopy(in, out string, log func(string)) error {
 	return nil
 }
 
-// trimTarget reads the card's partition table and asks trim.Size where the
-// data ends. 0 means copy the whole card: trimming is off, or the table
-// couldn't be read or parsed.
 func trimTarget(d disk.Info, wantTrim bool, log func(string)) int64 {
 	if !wantTrim {
 		return 0
@@ -133,7 +132,6 @@ func trimTarget(d disk.Info, wantTrim bool, log func(string)) int64 {
 	return size
 }
 
-// backupJob reads d raw into out. target is how much to read; 0 means all of it.
 func backupJob(d disk.Info, out string, target int64, onProgress func(int64), log func(string)) (int64, error) {
 	log(fmt.Sprintf("Unmounting %s...", d.Identifier))
 	if err := disk.Unmount(d.Identifier); err != nil {
@@ -156,7 +154,6 @@ func backupJob(d disk.Info, out string, target int64, onProgress func(int64), lo
 	return fi.Size(), nil
 }
 
-// logHash hashes path, reporting progress through onProgress if it's non-nil.
 func logHash(path string, want bool, onProgress func(int64), log func(string)) error {
 	if !want {
 		return nil
@@ -226,7 +223,6 @@ func backupCopy(src, dst string, log func(string)) error {
 	return nil
 }
 
-// refuseUnlessCard rejects any disk that is not external and removable.
 func refuseUnlessCard(d disk.Info) error {
 	if d.Internal {
 		return fmt.Errorf("%s is an internal disk; refusing to patch it", d.Identifier)
@@ -237,8 +233,6 @@ func refuseUnlessCard(d disk.Info) error {
 	return nil
 }
 
-// planCardPatch refuses any write that would land outside the nav image.
-// limit bounds the search for it (consent.Find scans no further); 0 means no bound.
 func planCardPatch(r io.ReaderAt, limit int64, selected []int, log func(string)) ([]disk.Range, error) {
 	var ranges []disk.Range
 	for _, i := range selected {
@@ -263,8 +257,6 @@ func planCardPatch(r io.ReaderAt, limit int64, selected []int, log func(string))
 	return ranges, nil
 }
 
-// Reads straight off the device, no scratch copy of the card; the caller must unmount d first.
-// onProgress, if non-nil, is called with the read's high-water mark as the signature scan advances.
 func planCardPatchDevice(d disk.Info, selected []int, onProgress func(int64), log func(string)) ([]disk.Range, error) {
 	f, err := disk.OpenRaw(d, false)
 	if err != nil {
@@ -319,8 +311,6 @@ func applyCardPatch(d disk.Info, ranges []disk.Range, log func(string)) error {
 	return nil
 }
 
-// patchJob clones in to out and runs the chosen rows in order; out is
-// removed again if any row fails, so a half-patched file never sits there.
 func patchJob(in, out string, selected []int, onCopyProgress func(int64), log func(string)) error {
 	if len(selected) == 0 {
 		return fmt.Errorf("no patch selected")

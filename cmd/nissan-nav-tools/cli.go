@@ -124,6 +124,11 @@ func runAnonymizeCLI(args []string) int {
 	for _, it := range rep.Items {
 		fmt.Printf("  %-55s %-45s %8s\n", it.Path, it.What, humansize.Format(it.Size))
 	}
+	if rep.CWSPartitions > 0 {
+		fmt.Printf("  %-55s %-45s %8s (%d cluster(s))\n",
+			"<free space on the CWS partition(s)>", "old deleted/rewritten file residue",
+			humansize.Format(rep.FreeBytesZeroed), rep.FreeClusters)
+	}
 	if rep.FrontGapFound {
 		fmt.Printf("  %-55s %-45s %8s (%d markers seen)\n",
 			"<front gap settings area>", "unit-written state, layout undecoded",

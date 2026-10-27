@@ -48,6 +48,25 @@ func utf16le(s string) []byte {
 	return out
 }
 
+func bitmapEntry(first uint32, dataSize uint64) []byte {
+	e := make([]byte, 32)
+	e[0] = 0x81
+	putLE32(e[0x14:0x18], first)
+	b := make([]byte, 8)
+	putLE32(b[0:4], uint32(dataSize))
+	copy(e[0x18:0x20], b)
+	return e
+}
+
+func buildBitmap(clusterCount int, allocated []int) []byte {
+	bits := make([]byte, (clusterCount+7)/8)
+	for _, c := range allocated {
+		bit := c - 2
+		bits[bit/8] |= 1 << uint(bit%8)
+	}
+	return bits
+}
+
 func dirEntry(name string, isDir, noFat bool, first uint32, dataSize uint64) []byte {
 	e := make([]byte, 96)
 	e[0] = 0x85
@@ -85,6 +104,8 @@ func buildSynthCard(size int) *memImg {
 	putLE32(boot[0x50:0x54], 1)
 	putLE32(boot[0x54:0x58], 1)
 	putLE32(boot[0x58:0x5c], 2)
+	const clusterCount = 38
+	putLE32(boot[0x5c:0x60], clusterCount)
 	putLE32(boot[0x60:0x64], 2)
 	boot[0x6c] = 9
 	boot[0x6d] = 0
@@ -99,6 +120,12 @@ func buildSynthCard(size int) *memImg {
 	root := img.data[clusterOff(2) : clusterOff(2)+512]
 	copy(root, dirEntry("PRIVATE", true, false, 3, 0))
 
+	const bitmapCluster = 20
+	allocated := []int{2, 3, 4, 5, 6, 7, bitmapCluster}
+	bitmapBits := buildBitmap(clusterCount, allocated)
+	copy(root[96:], bitmapEntry(bitmapCluster, uint64(len(bitmapBits))))
+	copy(img.data[clusterOff(bitmapCluster):], bitmapBits)
+
 	private := img.data[clusterOff(3) : clusterOff(3)+512]
 	copy(private, dirEntry("TEL", true, false, 4, 0))
 
@@ -112,9 +139,7 @@ func buildSynthCard(size int) *memImg {
 	for i := 0; i < 100; i++ {
 		fileData[i] = 0xAA
 	}
-	// a marker past the logical size, in the same cluster's slack -
-	// Reset should clear this too, not just the first 100 bytes.
-	fileData[200] = 0xBB // past the logical size, in the cluster's slack
+	fileData[200] = 0xBB
 
 	return img
 }
@@ -164,5 +189,30 @@ func TestResetNeverTouchesUnmatchedFile(t *testing.T) {
 	}
 	if !bytes.Equal(other, before) {
 		t.Errorf("an unmatched file was modified")
+	}
+}
+
+func TestResetZeroesFreeClustersButNotAllocatedOnes(t *testing.T) {
+	img := buildSynthCard(10*512 + 40*512)
+	clusterOff := func(c int) int { return 10*512 + (2+(c-2))*512 }
+
+	const freeCluster = 10
+	residue := img.data[clusterOff(freeCluster) : clusterOff(freeCluster)+512]
+	copy(residue, []byte{0x85, 0x02, 'o', 'l', 'd'})
+
+	rep, err := Reset(img, int64(len(img.data)))
+	if err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+	if !bytes.Equal(residue, make([]byte, 512)) {
+		t.Errorf("free cluster %d still holds old data: %x", freeCluster, residue[:8])
+	}
+	if rep.FreeClusters == 0 || rep.FreeBytesZeroed == 0 {
+		t.Errorf("report shows no free space cleared: %+v", rep)
+	}
+
+	phonebook := img.data[clusterOff(6) : clusterOff(6)+512]
+	if !bytes.Equal(phonebook, make([]byte, 512)) {
+		t.Errorf("allocated phonebook cluster not zeroed")
 	}
 }

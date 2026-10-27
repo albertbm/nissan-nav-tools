@@ -7,13 +7,11 @@ import (
 	"io"
 )
 
-// ReadWriterAt is what a card image or device has to support.
 type ReadWriterAt interface {
 	io.ReaderAt
 	io.WriterAt
 }
 
-// Item is one file or region the reset found and zeroed.
 type Item struct {
 	Path   string
 	Offset int64
@@ -31,9 +29,11 @@ type Report struct {
 	FrontGapRecords int
 
 	CWSPartitions int
+
+	FreeClusters    int64
+	FreeBytesZeroed int64
 }
 
-// BytesZeroed totals every item plus the front gap.
 func (r Report) BytesZeroed() int64 {
 	var n int64
 	for _, it := range r.Items {
@@ -42,6 +42,7 @@ func (r Report) BytesZeroed() int64 {
 	if r.FrontGapFound {
 		n += r.FrontGapSize
 	}
+	n += r.FreeBytesZeroed
 	return n
 }
 
@@ -83,6 +84,12 @@ func Reset(f ReadWriterAt, size int64) (Report, error) {
 				What:   it.what,
 			})
 		}
+		clusters, bytesZeroed, err := vol.zeroFreeClusters(f)
+		if err != nil {
+			return rep, fmt.Errorf("zeroing free space on the exFAT partition at LBA %d: %w", p.lba, err)
+		}
+		rep.FreeClusters += clusters
+		rep.FreeBytesZeroed += bytesZeroed
 	}
 
 	if err := resetFrontGap(f, size, &rep); err != nil {
