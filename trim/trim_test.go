@@ -12,14 +12,13 @@ func putLE32(b []byte, v uint32) {
 	b[3] = byte(v >> 24)
 }
 
-// mbrSector builds a 512-byte MBR-style sector, optionally with the Clarion signature, and one partition entry.
 func mbrSector(clarion bool, lba, count uint32) []byte {
 	s := make([]byte, 512)
 	if clarion {
 		copy(s, []byte("CLARION ID"))
 	}
 	e := s[0x1be : 0x1be+16]
-	e[4] = 0x07 // any non-zero type
+	e[4] = 0x07
 	putLE32(e[8:12], lba)
 	putLE32(e[12:16], count)
 	s[510], s[511] = 0x55, 0xaa

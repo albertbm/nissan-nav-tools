@@ -2,7 +2,6 @@ package anonymize
 
 import "bytes"
 
-// Offsets are specific to the ZE0/ZE1/ME0 cards this project has.
 const (
 	frontGapOffset = 413196288
 	frontGapSize   = 415088640 - 413196288

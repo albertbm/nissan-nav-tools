@@ -5,20 +5,18 @@ import "io"
 // BufBlockSize is the aligned block BufferedReaderAt reads and caches; a raw device on macOS refuses an unaligned read.
 const BufBlockSize = 4 << 20
 
-// BufferedReaderAt turns small or unaligned ReadAt calls into block-aligned reads against src, keeping the last few blocks in memory.
 type BufferedReaderAt struct {
 	src       io.ReaderAt
 	blockSize int64
 	cap       int
 	cache     map[int64][]byte
-	order     []int64 // recency, oldest first
+	order     []int64
 }
 
 func NewBufferedReaderAt(src io.ReaderAt) *BufferedReaderAt {
 	return &BufferedReaderAt{src: src, blockSize: BufBlockSize, cap: 4, cache: make(map[int64][]byte)}
 }
 
-// A short block back (less than blockSize) means src ended inside it.
 func (b *BufferedReaderAt) block(start int64) ([]byte, error) {
 	if blk, ok := b.cache[start]; ok {
 		return blk, nil

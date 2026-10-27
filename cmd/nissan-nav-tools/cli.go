@@ -18,15 +18,11 @@ import (
 	"nissan-nav-tools/trim"
 )
 
-// isTerminal is a minimal check, good enough to decide between a \r-overwritten
-// line and one print per call; a stub file in stdout's place just loses the carriage returns.
 func isTerminal(f *os.File) bool {
 	fi, err := f.Stat()
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
-// cliProgress prints an overwriting progress line on a terminal, or nothing
-// in between (the final summary line still runs) when stdout isn't one.
 func cliProgress(total int64) func(int64) {
 	tr := progress.New(total)
 	tty := isTerminal(os.Stdout)
@@ -99,6 +95,12 @@ func runAnonymizeCLI(args []string) int {
 		fmt.Fprintf(os.Stderr, "anonymize: %v\n", err)
 		return 1
 	}
+	done := false
+	defer func() {
+		if !done && !*inPlace {
+			os.Remove(target)
+		}
+	}()
 
 	f, err := os.OpenFile(target, os.O_RDWR, 0o644)
 	if err != nil {
@@ -117,6 +119,7 @@ func runAnonymizeCLI(args []string) int {
 		fmt.Fprintf(os.Stderr, "anonymize: %v\n", err)
 		return 1
 	}
+	done = true
 
 	fmt.Printf("anonymized %s\n", target)
 	fmt.Printf("%d exFAT partition(s) walked, %d item(s) zeroed, %s total\n",
@@ -157,6 +160,12 @@ func runConsentCLI(args []string) int {
 		fmt.Fprintf(os.Stderr, "consent: %v\n", err)
 		return 1
 	}
+	done := false
+	defer func() {
+		if !done && !*inPlace {
+			os.Remove(target)
+		}
+	}()
 
 	f, err := os.OpenFile(target, os.O_RDWR, 0o644)
 	if err != nil {
@@ -175,6 +184,7 @@ func runConsentCLI(args []string) int {
 		fmt.Fprintf(os.Stderr, "consent: %v\n", err)
 		return 1
 	}
+	done = true
 
 	fmt.Printf("patched %s\n", target)
 	fmt.Printf("build %s, chunk %d: %d -> %d bytes, %d pages written\n",

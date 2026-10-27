@@ -13,13 +13,11 @@ import (
 	"github.com/ncruces/zenity"
 )
 
-// imgFilters is the native dialogs' file filter: card images, or anything.
 var imgFilters = zenity.FileFilters{
 	{Name: "Card image", Patterns: []string{"*.img"}, CaseFold: true},
 	{Name: "All files", Patterns: []string{"*"}},
 }
 
-// pickFile runs the dialog off the UI thread and calls back on it. A cancel is quiet.
 func pickFile(startDir string, log func(string), onChosen func(path string)) {
 	go func() {
 		path, err := zenity.SelectFile(zenity.Filename(startDir), imgFilters)
@@ -33,7 +31,6 @@ func pickFile(startDir string, log func(string), onChosen func(path string)) {
 	}()
 }
 
-// pickSaveFile is pickFile for saving, and remembers the chosen folder as the next default.
 func pickSaveFile(startPath string, log func(string), onChosen func(path string)) {
 	go func() {
 		path, err := zenity.SelectFileSave(zenity.Filename(startPath), zenity.ConfirmOverwrite(), imgFilters)
@@ -66,7 +63,6 @@ func runGUI() {
 	w.ShowAndRun()
 }
 
-// logEntry drops typed input so it reads as a selectable box, not a disabled one.
 type logEntry struct {
 	widget.Entry
 }
@@ -99,7 +95,6 @@ func newLog() (fyne.CanvasObject, func(string), func()) {
 	return scroll, appendLine, clear
 }
 
-// newHashCheck is opt-in: hashing a full card image is slow.
 func newHashCheck() *widget.Check {
 	return widget.NewCheck("Compute SHA-256", nil)
 }
@@ -120,7 +115,6 @@ func dirWritable(dir string) bool {
 	return true
 }
 
-// fallbackOutputDir is the last output folder, else ~/Documents, never a drive root.
 func fallbackOutputDir() string {
 	if last := fyne.CurrentApp().Preferences().String(prefLastOutputDir); dirWritable(last) {
 		return last
@@ -133,7 +127,6 @@ func fallbackOutputDir() string {
 	return "."
 }
 
-// defaultOutputDir is next to in, or fallbackOutputDir() if that's not writable.
 func defaultOutputDir(in string) string {
 	if in != "" {
 		if d := dirOf(in); dirWritable(d) {

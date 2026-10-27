@@ -53,7 +53,6 @@ func infoFor(id string) (Info, error) {
 	return parseInfo(js)
 }
 
-// toJSON runs an XML plist through plutil, so this needs no plist library.
 func toJSON(xmlPlist []byte) ([]byte, error) {
 	cmd := exec.Command("plutil", "-convert", "json", "-o", "-", "-")
 	cmd.Stdin = bytes.NewReader(xmlPlist)

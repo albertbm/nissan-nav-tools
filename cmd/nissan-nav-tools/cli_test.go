@@ -112,8 +112,6 @@ func TestPatchJobRefusesSameFile(t *testing.T) {
 	}
 }
 
-// putLE32 and clarionSector1 build just enough of a trim-parseable table
-// without pulling unexported helpers out of the trim package.
 func putLE32(b []byte, v uint32) {
 	b[0] = byte(v)
 	b[1] = byte(v >> 8)
@@ -132,8 +130,7 @@ func clarionSector1(lba, count uint32) []byte {
 	return s
 }
 
-// A trim image has to be bigger than trim.StockSize for there to be
-// anything to trim; the body stays sparse so the test is instant.
+// The image must be bigger than trim.StockSize to have anything to trim; the body stays sparse so the test is instant.
 func writeTrimmableImage(t *testing.T, path string) {
 	t.Helper()
 	f, err := os.Create(path)
@@ -162,5 +159,33 @@ func TestTrimCLIRefusesSameFile(t *testing.T) {
 	}
 	if fi.Size() != 16_039_018_496+4<<20 {
 		t.Errorf("in was truncated: size is now %d", fi.Size())
+	}
+}
+
+func TestRunAnonymizeCLICleansUpOnFailure(t *testing.T) {
+	d := t.TempDir()
+	in := filepath.Join(d, "x.img")
+	os.WriteFile(in, []byte("not a clarion image"), 0o644)
+	out := filepath.Join(d, "x.anon.img")
+
+	if code := runAnonymizeCLI([]string{"-in", in, "-out", out}); code == 0 {
+		t.Fatal("anonymize succeeded on a non-Clarion file")
+	}
+	if _, err := os.Stat(out); !os.IsNotExist(err) {
+		t.Errorf("half-made output was left behind: %v", err)
+	}
+}
+
+func TestRunConsentCLICleansUpOnFailure(t *testing.T) {
+	d := t.TempDir()
+	in := filepath.Join(d, "x.img")
+	os.WriteFile(in, []byte("not a nav image"), 0o644)
+	out := filepath.Join(d, "x.consent.img")
+
+	if code := runConsentCLI([]string{"-in", in, "-out", out}); code == 0 {
+		t.Fatal("consent patch succeeded on a non-nav file")
+	}
+	if _, err := os.Stat(out); !os.IsNotExist(err) {
+		t.Errorf("half-made output was left behind: %v", err)
 	}
 }

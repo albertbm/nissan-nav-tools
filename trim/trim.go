@@ -1,5 +1,4 @@
-// Package trim finds the trimmed size for a card image: the end of its
-// last partition, padded to match a stock card or rounded up to 1 MiB.
+// Package trim finds the trimmed size for a card image: the end of its last partition, padded to a stock card or 1 MiB.
 package trim
 
 import (
@@ -21,8 +20,6 @@ type partEntry struct {
 	count int64
 }
 
-// Size is the end of r's last partition, padded up to StockSize or rounded
-// up to 1 MiB. It reads only the first two sectors.
 func Size(r io.ReaderAt) (int64, error) {
 	sector0 := make([]byte, sectorSize)
 	if _, err := r.ReadAt(sector0, 0); err != nil {
@@ -89,7 +86,6 @@ func FirstPartitionStart(r io.ReaderAt) (int64, error) {
 	return start * sectorSize, nil
 }
 
-// readPartitionTable reads the MBR entry layout at 0x1be, shared by a Clarion sector 1 and an ordinary sector 0.
 func readPartitionTable(sector []byte) ([]partEntry, error) {
 	if len(sector) < 512 || sector[510] != 0x55 || sector[511] != 0xaa {
 		return nil, fmt.Errorf("no boot signature")

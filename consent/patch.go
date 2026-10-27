@@ -1,6 +1,4 @@
-// Package consent patches the nav image on a Clarion QY8 map card to skip
-// the telematics consent screen. The .mod header must stay byte-identical,
-// because the loader only boots the card's copy of NK2 when it matches the NAND's.
+// Package consent patches the nav image on a Clarion QY8 map card to skip the telematics consent screen: the .mod header must stay byte-identical, because the loader only boots the card's copy of NK2 when it matches the NAND's.
 package consent
 
 import (
@@ -16,7 +14,6 @@ import (
 
 const pageSize = 4096
 
-// ReadWriterAt is what disk.OpenDeviceForReadWrite returns.
 type ReadWriterAt interface {
 	io.ReaderAt
 	io.WriterAt
@@ -28,22 +25,20 @@ type Target struct {
 	Size   int
 }
 
-// Result is what the patch did. SHA256 covers the whole .mod.
 type Result struct {
 	Target       Target
 	Chunk        int
-	Stock        int // chunk's packed size as shipped
-	Packed       int // and after recompression
-	Room         int // what the chunk's sectors hold
+	Stock        int
+	Packed       int
+	Room         int
 	Compensation uint32
-	Pages        int // 4 KiB pages written
+	Pages        int
 	SHA256       string
 }
 
 // ProbeOffset is where the nav image sits on every card measured so far (ZE1, ZE0, ME0).
 const ProbeOffset = 0x4d00000
 
-// Find names the build it recognises, or, failing that, whatever build name the image itself claims.
 func Find(f io.ReaderAt, size int64) (Target, error) {
 	if t, err := probeFixed(f); err == nil {
 		return t, nil
@@ -195,8 +190,7 @@ func diffPages(before, mod []byte, base int64) []PageWrite {
 	return writes
 }
 
-// ApplyConsentSkip refuses to write unless the handler matches byte for
-// byte, so a map version whose addresses moved is left alone, not corrupted.
+// ApplyConsentSkip refuses to write unless the handler matches byte for byte, leaving a moved map version untouched.
 func ApplyConsentSkip(f ReadWriterAt, size int64, log func(string)) (Result, error) {
 	res, writes, err := PlanConsentSkip(f, size, log)
 	if err != nil {
@@ -271,6 +265,9 @@ func patchMod(mod []byte, bd build, log func(string)) (Result, error) {
 		return Result{}, fmt.Errorf("chunk %d: %w", i, err)
 	}
 	if err := checkWords(plain[at:], p.stock); err != nil {
+		if checkWords(plain[at:], bd.skipBody()) == nil {
+			return Result{}, fmt.Errorf("%s is already patched", bd.name)
+		}
 		return Result{}, fmt.Errorf("chunk %d +0x%x: %w", i, at, err)
 	}
 	putWords(plain[at:], bd.skipBody())

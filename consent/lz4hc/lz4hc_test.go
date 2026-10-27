@@ -7,7 +7,6 @@ import (
 	"testing"
 )
 
-// lcg is the generator the reference run used, so a vector can name a size instead of carrying the bytes.
 func lcg(n int) []byte {
 	out := make([]byte, n)
 	x := uint32(1)
@@ -18,7 +17,6 @@ func lcg(n int) []byte {
 	return out
 }
 
-// codelike is repetitive data with noise through it, exercising both the chain search and the optimal parser.
 func codelike(n int) []byte {
 	noise := lcg(4096)
 	var out []byte

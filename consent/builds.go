@@ -37,7 +37,7 @@ type handler struct {
 
 var builds = []build{
 	{
-		name:    "G218ENNI.120", // ZE1, 2018 onwards
+		name:    "G218ENNI.120",
 		modLen:  31984640,
 		codeROM: 0xa7c000,
 		codeVA:  0x413d1000,
@@ -73,7 +73,7 @@ var builds = []build{
 		},
 	},
 	{
-		name:    "G214ELNI.062", // ZE0, 2014 to 2017
+		name:    "G214ELNI.062",
 		modLen:  30647808,
 		codeROM: 0xa11000,
 		codeVA:  0x412e1000,
@@ -109,7 +109,7 @@ var builds = []build{
 		},
 	},
 	{
-		name:       "G214ELNI.017", // ME0
+		name:       "G214ELNI.017",
 		modLen:     30675968,
 		codeROM:    0xa11000,
 		codeVA:     0x412e1000,
@@ -141,8 +141,7 @@ var builds = []build{
 	},
 }
 
-// skipBody writes VAR_CWS_AGREE_SKIP as "true", sets both agree-status
-// variables, and notifies Telema. Twenty-nine instructions in, twenty-nine out.
+// skipBody writes VAR_CWS_AGREE_SKIP and both agree-status variables, then notifies Telema: 29 instructions in, 29 out.
 func (bd build) skipBody() []uint32 {
 	p := bd.skip
 	a := p.va
@@ -151,31 +150,31 @@ func (bd build) skipBody() []uint32 {
 		bl(a+0x00, bd.getContext),
 		ldrPC(a+0x04, 2, p.pTrue),
 		movImm(1, p.varSkip),
-		bl(a+0x0c, bd.setVar), // VAR_CWS_AGREE_SKIP = "true", so no screen
+		bl(a+0x0c, bd.setVar),
 		bl(a+0x10, bd.getContext),
 		ldrPC(a+0x14, 2, p.pTrue),
 		movImm(1, p.varAgree),
-		bl(a+0x1c, bd.setVar), // VAR_I_AGREE_STATUS = "true"
+		bl(a+0x1c, bd.setVar),
 		bl(a+0x20, bd.getContext),
 		ldrPC(a+0x24, 2, p.pTrue),
 		movImm(1, p.varStartup),
-		bl(a+0x2c, bd.setVar), // VAR_START_UP_I_AGREE_STATUS = "true"
+		bl(a+0x2c, bd.setVar),
 		bl(a+0x30, bd.getContext),
 		movw(2, p.notify),
 		movImm(1, p.ctrl),
-		bl(a+0x3c, bd.execFn), // TELEMA_NOTIFY_AGREE
+		bl(a+0x3c, bd.execFn),
 		bl(a+0x40, bd.getContext),
 		bl(a+0x44, bd.getState),
 		movw(1, p.action),
 		bl(a+0x4c, bd.evHandler),
-		0xe3500000, // cmp r0, #0
+		0xe3500000,
 		bne(a+0x54, done),
 		bl(a+0x58, bd.getContext),
 		bl(a+0x5c, bd.getState2),
 		movw(1, p.action),
 		bl(a+0x64, bd.evHandler),
-		0xe3a03001, // done: mov r3, #1
-		0xe58d3000, // str r3, [sp]
+		0xe3a03001,
+		0xe58d3000,
 		b(a+0x70, p.tail),
 	}
 }

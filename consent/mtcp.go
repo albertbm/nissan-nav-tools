@@ -7,7 +7,6 @@ import (
 
 const sectorSize = 512
 
-// Offsets in the 512-byte .mod header.
 const (
 	offPayloadLen = 0x00 // container length, less this header
 	offSum4       = 0x34 // word sum of everything after this header
@@ -16,23 +15,21 @@ const (
 	segOffset     = 0x200
 )
 
-// Offsets in segment 0's header sector.
 const (
-	offMagic     = 0x00 // "MTCP"
+	offMagic     = 0x00
 	offChunkCnt  = 0x04
 	offReserved  = 0x1c // three words the loader sums but nothing reads
-	offChunkEnts = 0x20 // 0x20 bytes each: sectors, plain size, packed size, sum
+	offChunkEnts = 0x20
 
 	loaderSpan = 0x1e0 // how much of the header sector the loader checksums; the tail past it is invisible to it
 )
 
-// chunk is one LZ4 block in segment 0, 2 MiB of plaintext padded to whole sectors.
 type chunk struct {
-	at      int // byte offset in the .mod
+	at      int
 	sectors int
-	plain   int // uncompressed length
-	packed  int // compressed length
-	plainAt int // offset in the segment's concatenated plaintext
+	plain   int
+	packed  int
+	plainAt int
 }
 
 // wordSum is the container's checksum throughout: a plain 32-bit sum of little-endian words, not a CRC.

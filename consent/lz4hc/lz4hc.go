@@ -1,6 +1,4 @@
-// Package lz4hc ports LZ4HC_compress_optimal from lz4 v1.10.0, single block
-// only, byte-identical to liblz4's level 12: Go's LZ4 libraries pack about
-// 6% looser, enough to overrun a map-image chunk's allocated sectors.
+// Package lz4hc ports LZ4HC_compress_optimal (lz4 v1.10.0, single block), byte-identical to liblz4's level 12: Go's LZ4 libraries pack about 6% looser, enough to overrun a map-image chunk's allocated sectors.
 package lz4hc
 
 import "encoding/binary"
@@ -84,7 +82,6 @@ func countPattern(src []byte, p, end int, pattern uint32) int {
 	return n
 }
 
-// countPatternBack aligns src[p-1] against the pattern's last byte.
 func countPatternBack(src []byte, p, low int, pattern uint32) int {
 	var pb [4]byte
 	binary.LittleEndian.PutUint32(pb[:], pattern)
@@ -108,9 +105,7 @@ func (c *ctx) insert(target uint32) {
 	c.nextToUpdate = target
 }
 
-// findMatch is LZ4HC_InsertAndGetWiderMatch, forward-search only: chain
-// swapping jumps to a farther next link, pattern analysis seeks across a
-// run of one repeated byte instead of walking it link by link.
+// findMatch is LZ4HC_InsertAndGetWiderMatch, forward-search only: chain swapping jumps to a farther next link.
 func (c *ctx) findMatch(ip, iHighLimit, minLen int) match {
 	src := c.src
 	ipIndex := uint32(ip) + prefixIdx
@@ -134,7 +129,6 @@ func (c *ctx) findMatch(ip, iHighLimit, minLen int) match {
 		matchLength := 0
 		m := int(matchIndex - prefixIdx)
 
-		// Cheap reject before the full compare: bytes straddling the current best match must agree.
 		if read16(src, ip+longest-1) == read16(src, m+longest-1) && read32(src, m) == pattern {
 			matchLength = minMatch + count(src, ip+minMatch, m+minMatch, iHighLimit)
 			if matchLength > longest {
@@ -186,7 +180,6 @@ func (c *ctx) findMatch(ip, iHighLimit, minLen int) match {
 					}
 					segment := back + forward
 					if segment >= srcPatternLength && forward <= srcPatternLength {
-						// Far enough into the run to cover the whole source pattern.
 						matchIndex = candidate + uint32(forward) - uint32(srcPatternLength)
 					} else {
 						matchIndex = candidate - uint32(back)
@@ -307,7 +300,6 @@ func compress(src, dst []byte) int {
 			continue
 		}
 
-		// Seed the price table with leading literals, then the first match at every truncated length.
 		for rPos := 0; rPos < minMatch; rPos++ {
 			opt[rPos] = optimal{price: literalsPrice(llen + rPos), mlen: 1, litlen: llen + rPos}
 		}
@@ -333,7 +325,6 @@ func compress(src, dst []byte) int {
 			if ip+cur > mflimit {
 				break
 			}
-			// Skip the search if price doesn't climb just past this position.
 			if opt[cur+1].price <= opt[cur].price &&
 				opt[cur+minMatch].price < opt[cur].price+3 {
 				continue
@@ -384,7 +375,6 @@ func compress(src, dst []byte) int {
 			cur = lastMatchPos - bestMlen
 		}
 
-		// Walk the chosen path back to front, turning "how I got here" into "what to emit here".
 		pos, selML, selOff := cur, bestMlen, bestOff
 		for {
 			nextML, nextOff := opt[pos].mlen, opt[pos].off

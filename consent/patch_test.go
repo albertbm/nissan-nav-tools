@@ -3,6 +3,7 @@ package consent
 import (
 	"bytes"
 	"encoding/binary"
+	"strings"
 	"testing"
 
 	"nissan-nav-tools/consent/lz4hc"
@@ -45,7 +46,6 @@ func TestWordSum(t *testing.T) {
 	}
 }
 
-// testBuild fits a container small enough for a test; the handler lands at plaintext offset 0x400.
 func testBuild() build {
 	stock := make([]uint32, 29)
 	for i := range stock {
@@ -81,14 +81,12 @@ func testBuild() build {
 	}
 }
 
-// testPlain is 8 KiB of compressible filler with the stock handler in it.
 func testPlain(bd build) []byte {
 	plain := bytes.Repeat([]byte{0xe1, 0xa0, 0x00, 0x00, 0x12, 0x34, 0x00, 0x00}, 1024)
 	putWords(plain[0x400:], bd.skip.stock)
 	return plain
 }
 
-// testMod assembles a one-segment container around plain, with slack bytes of room beyond what the chunk needs.
 func testMod(t *testing.T, bd *build, plain []byte, slack int) []byte {
 	t.Helper()
 	packed := lz4hc.Compress(plain)
@@ -140,7 +138,6 @@ func TestPatchMod(t *testing.T) {
 		t.Error("the 512-byte header changed")
 	}
 
-	// Run patchMod's own checks again from the outside, against the container as written.
 	cs, err := chunks(mod)
 	if err != nil {
 		t.Fatalf("chunks: %v", err)
@@ -170,7 +167,7 @@ func TestPatchMod(t *testing.T) {
 func TestPatchModRefusesAnUnknownHandler(t *testing.T) {
 	bd := testBuild()
 	plain := testPlain(bd)
-	plain[0x400+4*7] ^= 0x01 // one bit, in the middle of the body
+	plain[0x400+4*7] ^= 0x01
 	mod := testMod(t, &bd, plain, sectorSize)
 	before := bytes.Clone(mod)
 
@@ -179,6 +176,25 @@ func TestPatchModRefusesAnUnknownHandler(t *testing.T) {
 	}
 	if !bytes.Equal(mod, before) {
 		t.Error("the container was modified before the check failed")
+	}
+}
+
+// Re-running the patch on its own output used to dump mismatched instruction words instead of saying "already patched".
+func TestPatchModDetectsAlreadyPatched(t *testing.T) {
+	bd := testBuild()
+	plain := testPlain(bd)
+	putWords(plain[0x400:], bd.skipBody())
+	mod := testMod(t, &bd, plain, sectorSize)
+
+	_, err := patchMod(mod, bd, func(string) {})
+	if err == nil {
+		t.Fatal("patched an already-patched handler a second time")
+	}
+	if strings.Contains(err.Error(), "instruction") {
+		t.Errorf("error still dumps instructions: %v", err)
+	}
+	if !strings.Contains(err.Error(), "already patched") {
+		t.Errorf("error doesn't say already patched: %v", err)
 	}
 }
 
@@ -198,8 +214,8 @@ func TestPatchModRefusesAChunkThatWouldNotFit(t *testing.T) {
 func TestFindSkipsUnalignedNames(t *testing.T) {
 	img := make([]byte, 4<<20)
 	name := []byte(builds[0].name)
-	copy(img[0x3333:], name)           // a stray copy in the map data
-	copy(img[0x200000+offName:], name) // the real container header
+	copy(img[0x3333:], name)
+	copy(img[0x200000+offName:], name)
 
 	got, err := Find(bytes.NewReader(img), int64(len(img)))
 	if err != nil {
@@ -265,7 +281,6 @@ func TestFindNamesAnUnknownBuild(t *testing.T) {
 	}
 }
 
-// TestDiffPagesStaysInRange checks a write never lands outside the .mod it came from.
 func TestDiffPagesStaysInRange(t *testing.T) {
 	const base = 0x200000 + 123
 	before := make([]byte, 3*pageSize+100)

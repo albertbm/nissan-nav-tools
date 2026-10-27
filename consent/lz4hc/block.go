@@ -5,7 +5,6 @@ import "errors"
 // ErrCorrupt is returned when a block does not decode to the expected length.
 var ErrCorrupt = errors.New("lz4hc: corrupt block")
 
-// Uncompress decodes an LZ4 block into a buffer of size uncompressedLen.
 func Uncompress(src []byte, uncompressedLen int) ([]byte, error) {
 	dst := make([]byte, 0, uncompressedLen)
 	for i := 0; i < len(src); {

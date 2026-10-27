@@ -1,7 +1,4 @@
-// Command nissan-nav-tools anonymizes and patches Clarion QY8 map card images.
-//
-// Run with no arguments for the GUI, or "anonymize"/"consent" for the
-// headless CLI; each also accepts "-h" for its own flags.
+// Command nissan-nav-tools anonymizes and patches Clarion QY8 map card images: run with no arguments for the GUI, or "anonymize"/"consent" for the headless CLI.
 package main
 
 import (

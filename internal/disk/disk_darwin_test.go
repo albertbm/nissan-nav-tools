@@ -10,11 +10,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Captured from `diskutil list -plist external physical | plutil -convert json -o - -`
-// on a Mac with one external SSD (disk4) and no card reader attached.
+// Captured from `diskutil list -plist external physical | plutil -convert json -o - -`, one external SSD (disk4), no card reader attached.
 const sampleListJSON = `{"AllDisksAndPartitions":[{"Partitions":[{"Size":209715200,"VolumeUUID":"0E239BC6-F960-3107-89CF-1C97F78BB46B","VolumeName":"EFI","Content":"EFI","DeviceIdentifier":"disk4s1","DiskUUID":"5D53BC6A-0DED-42C0-A133-74B2D7CCDCBF"},{"Size":511900434432,"Content":"Apple_APFS","DeviceIdentifier":"disk4s2","DiskUUID":"1B32BC89-280B-4C59-B9C1-F21BAEC6F045"}],"Size":512110190592,"Content":"GUID_partition_scheme","DeviceIdentifier":"disk4","OSInternal":false}],"VolumesFromDisks":[],"AllDisks":["disk4","disk4s1","disk4s2"],"WholeDisks":["disk4"]}`
 
-// Captured from `diskutil info -plist disk4 | plutil -convert json -o - -` on the same disk.
 const sampleInfoJSON = `{"DeviceIdentifier":"disk4","Internal":false,"RemovableMedia":false,"Ejectable":true,"WholeDisk":true,"MediaName":"SP PD60","Size":512110190592,"VirtualOrPhysical":"Physical"}`
 
 const sampleEmptyListJSON = `{"AllDisksAndPartitions":[],"VolumesFromDisks":[],"AllDisks":[],"WholeDisks":[]}`
