@@ -115,12 +115,44 @@ func Report() []string {
 	return append(out, platformNotes()...)
 }
 
-// OpenRaw opens id's raw device for I/O, refusing anything that isn't a card.
+// OpenRaw opens id's raw device for I/O, refusing anything that isn't a
+// card. A write also re-reads id's identifier fresh, in case the picked
+// card was pulled and another device took its identifier in the meantime.
 func OpenRaw(id Info, write bool) (*os.File, error) {
 	if err := refuseUnlessCard(id); err != nil {
 		return nil, err
 	}
+	if write {
+		if err := confirmStillThere(id); err != nil {
+			return nil, err
+		}
+	}
 	return platformOpen(id, write)
+}
+
+// confirmStillThere refuses a write unless id's identifier still names a
+// disk with the same size, name and removable flag as when it was picked.
+func confirmStillThere(id Info) error {
+	disks, err := platformList()
+	if err != nil {
+		return fmt.Errorf("re-checking %s before writing: %w", id.Identifier, err)
+	}
+	return checkStillThere(id, disks)
+}
+
+// checkStillThere is confirmStillThere's comparison, split out so it can
+// run against a fixed list in tests instead of the live platform listing.
+func checkStillThere(id Info, disks []Info) error {
+	for _, d := range disks {
+		if d.Identifier != id.Identifier {
+			continue
+		}
+		if d.Size != id.Size || d.Name != id.Name || d.Removable != id.Removable {
+			return fmt.Errorf("%s has changed since it was picked (now %q, %d bytes, removable=%v); refusing to write", id.Identifier, d.Name, d.Size, d.Removable)
+		}
+		return nil
+	}
+	return fmt.Errorf("%s is no longer attached; refusing to write", id.Identifier)
 }
 
 // Unmount clears the buffer cache so nothing else writes under a raw read.

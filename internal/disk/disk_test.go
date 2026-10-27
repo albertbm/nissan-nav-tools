@@ -74,7 +74,7 @@ func TestIsCard(t *testing.T) {
 }
 
 func TestHashStreamMatchesSHA256(t *testing.T) {
-	data := bytes.Repeat([]byte("card"), 10000) // bigger than one copyChunks buffer isn't required to prove it, but cheap
+	data := bytes.Repeat([]byte("card"), 10000)
 	want := sha256.Sum256(data)
 
 	var progressed int64
@@ -100,5 +100,34 @@ func TestHashStreamStopsAtN(t *testing.T) {
 	}
 	if got != hex.EncodeToString(want[:]) {
 		t.Errorf("got %s, want the hash of the first 40 bytes only", got)
+	}
+}
+
+func TestCheckStillThereAcceptsAnUnchangedDisk(t *testing.T) {
+	picked := Info{Identifier: "disk4", Name: "NISSAN", Size: 16_039_018_496, Removable: true}
+	now := []Info{picked}
+	if err := checkStillThere(picked, now); err != nil {
+		t.Errorf("rejected an unchanged disk: %v", err)
+	}
+}
+
+func TestCheckStillThereRejectsAVanishedDisk(t *testing.T) {
+	picked := Info{Identifier: "disk4", Name: "NISSAN", Size: 16_039_018_496, Removable: true}
+	if err := checkStillThere(picked, nil); err == nil {
+		t.Fatal("accepted a write with the disk no longer attached")
+	}
+}
+
+func TestCheckStillThereRejectsADifferentCardOnTheSameIdentifier(t *testing.T) {
+	picked := Info{Identifier: "disk4", Name: "NISSAN", Size: 16_039_018_496, Removable: true}
+	cases := []Info{
+		{Identifier: "disk4", Name: "SANDISK", Size: 16_039_018_496, Removable: true},
+		{Identifier: "disk4", Name: "NISSAN", Size: 64_000_000_000, Removable: true},
+		{Identifier: "disk4", Name: "NISSAN", Size: 16_039_018_496, Removable: false},
+	}
+	for _, now := range cases {
+		if err := checkStillThere(picked, []Info{now}); err == nil {
+			t.Errorf("accepted %+v in place of %+v", now, picked)
+		}
 	}
 }
