@@ -4,7 +4,10 @@ package disk
 
 import (
 	"encoding/binary"
+	"os"
 	"testing"
+
+	"golang.org/x/sys/windows"
 )
 
 func TestClassifyBusType(t *testing.T) {
@@ -136,5 +139,29 @@ func TestDiskNumberFromIdentifier(t *testing.T) {
 func TestDiskNumberFromIdentifierRejectsGarbage(t *testing.T) {
 	if _, err := diskNumberFromIdentifier("not-a-drive"); err == nil {
 		t.Error("expected an error for a malformed identifier")
+	}
+}
+
+// A write handle's own Close must drop its disk's locks; an earlier read handle can't release them by finalizing.
+func TestWriteLockedFileCloseReleasesItsOwnLocksOnly(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "nnt-lock-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lockedMu.Lock()
+	locked[7] = []windows.Handle{windows.InvalidHandle}
+	lockedMu.Unlock()
+
+	w := &writeLockedFile{File: f, diskNum: 7}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	lockedMu.Lock()
+	_, stillLocked := locked[7]
+	lockedMu.Unlock()
+	if stillLocked {
+		t.Error("Close on the write handle didn't release its disk's locks")
 	}
 }

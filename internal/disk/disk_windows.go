@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -77,7 +76,6 @@ func platformList() ([]Info, error) {
 	return out, nil
 }
 
-// Access 0 can query a drive without admin; reading it needs admin.
 func openQueryHandle(path string) (windows.Handle, error) {
 	p, err := windows.UTF16PtrFromString(path)
 	if err != nil {
@@ -161,7 +159,6 @@ func readCString(buf []byte, offset uint32) string {
 	return string(buf[offset:end])
 }
 
-// A volume can span more than one disk, so this returns every extent's disk number.
 func parseVolumeDiskExtents(buf []byte) ([]uint32, error) {
 	const extentsOffset = 8
 	const extentSize = 24
@@ -199,7 +196,6 @@ func diskNumberFromIdentifier(id string) (uint32, error) {
 	return uint32(n), nil
 }
 
-// locked holds handles until eject, the next unmount, or GC: *os.File has no Close hook to release them on.
 var (
 	lockedMu sync.Mutex
 	locked   = map[uint32][]windows.Handle{}
@@ -305,7 +301,19 @@ func platformEject(id string) error {
 	return nil
 }
 
-func platformOpen(id Info, write bool) (*os.File, error) {
+// writeLockedFile is a write handle whose Close also drops the volume locks; an earlier read handle has no such tie.
+type writeLockedFile struct {
+	*os.File
+	diskNum uint32
+}
+
+func (w *writeLockedFile) Close() error {
+	err := w.File.Close()
+	releaseLocks(w.diskNum)
+	return err
+}
+
+func platformOpen(id Info, write bool) (RawDevice, error) {
 	path := platformNode(id)
 	p, err := windows.UTF16PtrFromString(path)
 	if err != nil {
@@ -326,8 +334,12 @@ func platformOpen(id Info, write bool) (*os.File, error) {
 	}
 
 	f := os.NewFile(uintptr(h), path)
-	if diskNum, err := diskNumberFromIdentifier(id.Identifier); err == nil {
-		runtime.SetFinalizer(f, func(*os.File) { releaseLocks(diskNum) })
+	if !write {
+		return f, nil
 	}
-	return f, nil
+	diskNum, err := diskNumberFromIdentifier(id.Identifier)
+	if err != nil {
+		return f, nil
+	}
+	return &writeLockedFile{File: f, diskNum: diskNum}, nil
 }

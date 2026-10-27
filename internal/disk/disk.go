@@ -9,18 +9,15 @@ import (
 	"os"
 )
 
-// Info is one whole disk, external and physical.
 type Info struct {
-	Identifier string // e.g. "disk4"
-	Name       string // the device's media name, blank if none was reported
+	Identifier string
+	Name       string
 	Size       int64
 	Internal   bool
-	Removable  bool // true for a card reader's slot; false for most external enclosures
+	Removable  bool
 }
 
 const sectorBytes = 512
-
-// A multiple of sectorBytes: only the final, short chunk of a device write ever needs padding.
 const chunkSize = 4 << 20
 
 // Head unit cards top out at 64 GB; this keeps external drives off the list.
@@ -31,14 +28,12 @@ type Range struct {
 	Data   []byte
 }
 
-// Node is the raw device path to read d through, in the form the current platform uses.
 func (d Info) Node() string { return platformNode(d) }
 
 func isCard(d Info) bool {
 	return !d.Internal && d.Removable && d.Size > 0 && d.Size <= maxCardSize
 }
 
-// refuseUnlessCard rejects any disk that is not external and removable.
 func refuseUnlessCard(id Info) error {
 	if id.Internal {
 		return fmt.Errorf("refusing %s: it is an internal disk", id.Identifier)
@@ -86,7 +81,6 @@ func copyChunks(dst io.Writer, src io.Reader, onProgress func(int64), padWrites 
 	}
 }
 
-// List drops any disk that doesn't look like a card, even if the platform's own listing let it through.
 func List() ([]Info, error) {
 	disks, err := platformList()
 	if err != nil {
@@ -101,7 +95,6 @@ func List() ([]Info, error) {
 	return out, nil
 }
 
-// Report lists every disk and why it was or wasn't shown.
 func Report() []string {
 	disks, err := platformList()
 	var out []string
@@ -115,10 +108,16 @@ func Report() []string {
 	return append(out, platformNotes()...)
 }
 
-// OpenRaw opens id's raw device for I/O, refusing anything that isn't a
-// card. A write also re-reads id's identifier fresh, in case the picked
-// card was pulled and another device took its identifier in the meantime.
-func OpenRaw(id Info, write bool) (*os.File, error) {
+// RawDevice is an open raw disk handle; Close also drops a Windows write handle's volume locks, tied to Close not GC.
+type RawDevice interface {
+	io.Reader
+	io.ReaderAt
+	io.Writer
+	io.WriterAt
+	io.Closer
+}
+
+func OpenRaw(id Info, write bool) (RawDevice, error) {
 	if err := refuseUnlessCard(id); err != nil {
 		return nil, err
 	}
@@ -130,8 +129,6 @@ func OpenRaw(id Info, write bool) (*os.File, error) {
 	return platformOpen(id, write)
 }
 
-// confirmStillThere refuses a write unless id's identifier still names a
-// disk with the same size, name and removable flag as when it was picked.
 func confirmStillThere(id Info) error {
 	disks, err := platformList()
 	if err != nil {
@@ -140,8 +137,6 @@ func confirmStillThere(id Info) error {
 	return checkStillThere(id, disks)
 }
 
-// checkStillThere is confirmStillThere's comparison, split out so it can
-// run against a fixed list in tests instead of the live platform listing.
 func checkStillThere(id Info, disks []Info) error {
 	for _, d := range disks {
 		if d.Identifier != id.Identifier {
@@ -155,7 +150,6 @@ func checkStillThere(id Info, disks []Info) error {
 	return fmt.Errorf("%s is no longer attached; refusing to write", id.Identifier)
 }
 
-// Unmount clears the buffer cache so nothing else writes under a raw read.
 func Unmount(id string) error { return platformUnmount(id) }
 
 func Eject(id string) error { return platformEject(id) }
@@ -193,8 +187,6 @@ func ReadRaw(id Info, outPath string, maxBytes int64, onProgress func(written in
 	return copyChunks(out, r, onProgress, false)
 }
 
-// HashRaw reads the first n bytes of id's raw device and returns their
-// sha256, hashing the stream directly instead of staging it to a file.
 func HashRaw(id Info, n int64, onProgress func(written int64)) (string, error) {
 	src, err := OpenRaw(id, false)
 	if err != nil {
@@ -204,8 +196,6 @@ func HashRaw(id Info, n int64, onProgress func(written int64)) (string, error) {
 	return hashStream(src, n, onProgress)
 }
 
-// hashStream is HashRaw's body, split out so it can run against a plain
-// reader in tests instead of a real device.
 func hashStream(r io.Reader, n int64, onProgress func(written int64)) (string, error) {
 	h := sha256.New()
 	if err := copyChunks(h, io.LimitReader(r, n), onProgress, false); err != nil {
