@@ -56,8 +56,7 @@ func runGUI() {
 	w.SetContent(container.NewAppTabs(
 		container.NewTabItem("Back up", newBackupTab(w)),
 		container.NewTabItem("Restore", newRestoreTab(w)),
-		container.NewTabItem("Patch image", newPatchTab(w)),
-		container.NewTabItem("Factory reset", newResetTab(w)),
+		container.NewTabItem("Tools", newToolsTab(w)),
 	))
 	w.Resize(fyne.NewSize(640, 600))
 	w.ShowAndRun()
