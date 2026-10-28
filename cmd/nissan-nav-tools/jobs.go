@@ -62,7 +62,7 @@ func detectAppVersion(in string) appVersion {
 	return appVersion{name: t.Build, supported: consent.Supported(t.Build)}
 }
 
-func anonymizeCopy(in, out string, log func(string)) error {
+func resetCopy(in, out string, log func(string)) error {
 	if same, err := clone.SameFile(in, out); err != nil {
 		return err
 	} else if same {
@@ -87,10 +87,10 @@ func anonymizeCopy(in, out string, log func(string)) error {
 		return err
 	}
 
-	log("Anonymizing the copy...")
+	log("Resetting the copy...")
 	rep, err := anonymize.Reset(f, size)
 	if err != nil {
-		return fmt.Errorf("anonymize: %w", err)
+		return fmt.Errorf("reset: %w", err)
 	}
 	log(fmt.Sprintf("%d exFAT partition(s) walked, %d item(s) zeroed, %s total",
 		rep.CWSPartitions, len(rep.Items), humansize.Format(rep.BytesZeroed())))

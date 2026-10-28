@@ -77,22 +77,22 @@ func defaultOutput(in, suffix string) string {
 	return in + suffix + ext
 }
 
-func runAnonymizeCLI(args []string) int {
-	fs := flag.NewFlagSet("anonymize", flag.ExitOnError)
-	in := fs.String("in", "", "card image to anonymize (required)")
-	out := fs.String("out", "", "output image (default: <in>.anon<ext>)")
+func runResetCLI(args []string) int {
+	fs := flag.NewFlagSet("reset", flag.ExitOnError)
+	in := fs.String("in", "", "card image to reset (required)")
+	out := fs.String("out", "", "output image (default: <in>.reset<ext>)")
 	force := fs.Bool("force", false, "replace -out if it already exists")
 	inPlace := fs.Bool("in-place", false, "write to -in directly instead of a copy")
 	fs.Parse(args)
 
 	if *in == "" {
-		fmt.Fprintln(os.Stderr, "anonymize: -in is required")
+		fmt.Fprintln(os.Stderr, "reset: -in is required")
 		return 2
 	}
 
-	target, err := prepareTarget(*in, *out, ".anon", *inPlace, *force)
+	target, err := prepareTarget(*in, *out, ".reset", *inPlace, *force)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "anonymize: %v\n", err)
+		fmt.Fprintf(os.Stderr, "reset: %v\n", err)
 		return 1
 	}
 	done := false
@@ -104,24 +104,24 @@ func runAnonymizeCLI(args []string) int {
 
 	f, err := os.OpenFile(target, os.O_RDWR, 0o644)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "anonymize: opening %s: %v\n", target, err)
+		fmt.Fprintf(os.Stderr, "reset: opening %s: %v\n", target, err)
 		return 1
 	}
 	defer f.Close()
 	size, err := fileSize(f)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "anonymize: %v\n", err)
+		fmt.Fprintf(os.Stderr, "reset: %v\n", err)
 		return 1
 	}
 
 	rep, err := anonymize.Reset(f, size)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "anonymize: %v\n", err)
+		fmt.Fprintf(os.Stderr, "reset: %v\n", err)
 		return 1
 	}
 	done = true
 
-	fmt.Printf("anonymized %s\n", target)
+	fmt.Printf("reset %s\n", target)
 	fmt.Printf("%d exFAT partition(s) walked, %d item(s) zeroed, %s total\n",
 		rep.CWSPartitions, len(rep.Items), humansize.Format(rep.BytesZeroed()))
 	for _, it := range rep.Items {

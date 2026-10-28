@@ -166,6 +166,73 @@ func TestResetZeroesPhonebook(t *testing.T) {
 	}
 }
 
+func TestResetZeroesVoiceGrammar(t *testing.T) {
+	img := buildSynthCard(10*512 + 40*512)
+	clusterOff := func(c int) int { return 10*512 + (2+(c-2))*512 }
+
+	// /PRIVATE/TEL/PB_OBJ is cluster 5; add SPEECH/XX/TTG/PB01/GPB000.G2P and SPEECH/XX/TTG/AB01/GAB000.G2P as siblings of PRIVATE.
+	// Root already holds PRIVATE at [0:96] and the bitmap entry at [96:128]; SPEECH goes right after.
+	root := img.data[clusterOff(2) : clusterOff(2)+512]
+	copy(root[128:], dirEntry("SPEECH", true, false, 8, 0))
+
+	speech := img.data[clusterOff(8) : clusterOff(8)+512]
+	copy(speech, dirEntry("XX", true, false, 9, 0))
+
+	xx := img.data[clusterOff(9) : clusterOff(9)+512]
+	copy(xx, dirEntry("TTG", true, false, 10, 0))
+
+	ttg := img.data[clusterOff(10) : clusterOff(10)+512]
+	copy(ttg, dirEntry("PB01", true, false, 11, 0))
+	copy(ttg[96:], dirEntry("AB01", true, false, 12, 0))
+
+	pb01 := img.data[clusterOff(11) : clusterOff(11)+512]
+	copy(pb01, dirEntry("GPB000.G2P", false, true, 13, 20))
+	grammar := img.data[clusterOff(13) : clusterOff(13)+512]
+	for i := 0; i < 20; i++ {
+		grammar[i] = 0xAA
+	}
+
+	ab01 := img.data[clusterOff(12) : clusterOff(12)+512]
+	copy(ab01, dirEntry("GAB000.G2P", false, true, 14, 20))
+	seed := img.data[clusterOff(14) : clusterOff(14)+512]
+	for i := range seed {
+		seed[i] = 0xCC
+	}
+	before := append([]byte(nil), seed...)
+
+	// cluster 6 (the phonebook) is still referenced by the FAT chain as allocated in buildSynthCard; add 8-14 too.
+	fat := img.data[10*512+512 : 10*512+512+512]
+	for _, c := range []int{8, 9, 10, 11, 12, 13, 14} {
+		putLE32(fat[c*4:c*4+4], 0xffffffff)
+	}
+	const bitmapCluster = 20
+	allocated := []int{2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, bitmapCluster}
+	copy(img.data[clusterOff(bitmapCluster):], buildBitmap(38, allocated))
+
+	rep, err := Reset(img, int64(len(img.data)))
+	if err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+	if !bytes.Equal(grammar[:20], make([]byte, 20)) {
+		t.Errorf("voice grammar file not zeroed")
+	}
+	if !bytes.Equal(seed, before) {
+		t.Errorf("AB01's grammar seed was touched, want it left alone")
+	}
+	var sawGrammar bool
+	for _, it := range rep.Items {
+		if it.Path == "/SPEECH/XX/TTG/PB01/GPB000.G2P" {
+			sawGrammar = true
+		}
+		if it.Path == "/SPEECH/XX/TTG/AB01/GAB000.G2P" {
+			t.Errorf("AB01 reported as cleared")
+		}
+	}
+	if !sawGrammar {
+		t.Errorf("grammar file not reported: %+v", rep.Items)
+	}
+}
+
 func TestResetRefusesWithoutClarionSignature(t *testing.T) {
 	img := newMemImg(4096)
 	if _, err := Reset(img, int64(len(img.data))); err == nil {

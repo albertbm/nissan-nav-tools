@@ -1,4 +1,4 @@
-// Package anonymize zeros the phonebook, pairing, route history, CARWINGS cache, and front-gap settings on a Clarion QY8 card image.
+// Package anonymize zeros the phonebook, pairing, voice-dial grammar, route history, CARWINGS cache, and front-gap settings on a Clarion QY8 card image.
 package anonymize
 
 import (

@@ -126,12 +126,29 @@ var prefixRules = []prefixRule{
 	{"/PRIVATE/CWS/PIC/", "picture tied to a destination-history slot"},
 }
 
+type dirRule struct {
+	dir  *regexp.Regexp
+	what string
+}
+
+// The unit's own user-data reset deletes every PB01-PB05/UA01 voice grammar (XX/G2P and BE/GRM);
+// AB01 is a generic seed it leaves alone, so it's excluded here too.
+var dirRules = []dirRule{
+	{regexp.MustCompile(`^/SPEECH/(XX|BE)/TTG/PB0[1-5]$`), "voice-dial grammar for a phonebook slot"},
+	{regexp.MustCompile(`^/SPEECH/(XX|BE)/TTG/UA01$`), "voice-dial grammar for the home address"},
+}
+
 func wants(dir, name string) string {
 	dir = strings.ToUpper(dir)
 	name = strings.ToUpper(name)
 	for _, r := range rules {
 		if r.dir == dir && r.name.MatchString(name) {
 			return r.what
+		}
+	}
+	for _, dr := range dirRules {
+		if dr.dir.MatchString(dir) {
+			return dr.what
 		}
 	}
 	full := dir + "/" + name

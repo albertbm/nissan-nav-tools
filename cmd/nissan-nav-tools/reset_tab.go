@@ -8,9 +8,11 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-func newAnonymizeTab(w fyne.Window) fyne.CanvasObject {
+func newResetTab(w fyne.Window) fyne.CanvasObject {
 	logView, appendLog, clearLog := newLog()
-	status := widget.NewLabel("Pick an image file to anonymize.")
+	hint := widget.NewLabel("Removes the previous owner's data: phonebook, pairings, history, settings.")
+	hint.Wrapping = fyne.TextWrapWord
+	status := widget.NewLabel("Pick an image file to reset.")
 	status.Wrapping = fyne.TextWrapWord
 
 	var inPath string
@@ -24,12 +26,12 @@ func newAnonymizeTab(w fyne.Window) fyne.CanvasObject {
 		pickFile("", appendLog, func(path string) {
 			inPath = path
 			inLabel.SetText(inPath)
-			outEntry.SetText(defaultOutputPath(inPath, ".anon"))
+			outEntry.SetText(defaultOutputPath(inPath, ".reset"))
 		})
 	})
 
 	chooseOut := widget.NewButton("Choose output...", func() {
-		pickSaveFile(defaultOutputPath(inPath, ".anon"), appendLog, func(path string) {
+		pickSaveFile(defaultOutputPath(inPath, ".reset"), appendLog, func(path string) {
 			outEntry.SetText(path)
 		})
 	})
@@ -44,24 +46,24 @@ func newAnonymizeTab(w fyne.Window) fyne.CanvasObject {
 	speedLabel.Hide()
 
 	var runBtn *widget.Button
-	runBtn = widget.NewButton("Anonymize", func() {
+	runBtn = widget.NewButton("Reset", func() {
 		if inPath == "" {
 			status.SetText("Choose an image file first.")
 			return
 		}
 		out := outEntry.Text
 		if out == "" {
-			out = defaultOutputPath(inPath, ".anon")
+			out = defaultOutputPath(inPath, ".reset")
 			outEntry.SetText(out)
 		}
 
 		runBtn.Disable()
 		spinner.Show()
 		clearLog()
-		status.SetText("Anonymizing...")
+		status.SetText("Resetting...")
 		go func() {
 			defer fyne.Do(func() { runBtn.Enable(); spinner.Hide(); hashBar.Hide(); speedLabel.Hide() })
-			if err := anonymizeCopy(inPath, out, appendLog); err != nil {
+			if err := resetCopy(inPath, out, appendLog); err != nil {
 				fyne.Do(func() { status.SetText("Failed: " + err.Error()) })
 				return
 			}
@@ -86,6 +88,7 @@ func newAnonymizeTab(w fyne.Window) fyne.CanvasObject {
 		widget.NewLabelWithStyle("Input", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		container.NewBorder(nil, nil, nil, chooseIn, inLabel),
 		container.NewBorder(nil, nil, nil, chooseOut, outEntry),
+		hint,
 		hashCheck,
 		runBtn,
 		spinner,

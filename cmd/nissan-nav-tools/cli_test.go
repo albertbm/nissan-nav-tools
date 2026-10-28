@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -76,12 +77,12 @@ func TestPrepareTargetAllowsADifferentFile(t *testing.T) {
 	}
 }
 
-func TestAnonymizeCopyRefusesSameFile(t *testing.T) {
+func TestResetCopyRefusesSameFile(t *testing.T) {
 	d := t.TempDir()
 	in := filepath.Join(d, "x.img")
 	os.WriteFile(in, []byte("card"), 0o644)
-	if err := anonymizeCopy(in, in, func(string) {}); err == nil {
-		t.Fatal("anonymizeCopy let -out name -in")
+	if err := resetCopy(in, in, func(string) {}); err == nil {
+		t.Fatal("resetCopy let -out name -in")
 	}
 	if got, statErr := os.ReadFile(in); statErr != nil || string(got) != "card" {
 		t.Errorf("in was touched: %q, %v", got, statErr)
@@ -162,17 +163,33 @@ func TestTrimCLIRefusesSameFile(t *testing.T) {
 	}
 }
 
-func TestRunAnonymizeCLICleansUpOnFailure(t *testing.T) {
+func TestRunResetCLICleansUpOnFailure(t *testing.T) {
 	d := t.TempDir()
 	in := filepath.Join(d, "x.img")
 	os.WriteFile(in, []byte("not a clarion image"), 0o644)
-	out := filepath.Join(d, "x.anon.img")
+	out := filepath.Join(d, "x.reset.img")
 
-	if code := runAnonymizeCLI([]string{"-in", in, "-out", out}); code == 0 {
-		t.Fatal("anonymize succeeded on a non-Clarion file")
+	if code := runResetCLI([]string{"-in", in, "-out", out}); code == 0 {
+		t.Fatal("reset succeeded on a non-Clarion file")
 	}
 	if _, err := os.Stat(out); !os.IsNotExist(err) {
 		t.Errorf("half-made output was left behind: %v", err)
+	}
+}
+
+func TestCLICommandAnonymizeIsAnAliasForReset(t *testing.T) {
+	reset, ok := cliCommand("reset")
+	if !ok {
+		t.Fatal(`"reset" not recognized`)
+	}
+	alias, ok := cliCommand("anonymize")
+	if !ok {
+		t.Fatal(`"anonymize" not recognized`)
+	}
+	want := reflect.ValueOf(reset).Pointer()
+	got := reflect.ValueOf(alias).Pointer()
+	if got != want {
+		t.Error(`"anonymize" doesn't run the same command as "reset"`)
 	}
 }
 
