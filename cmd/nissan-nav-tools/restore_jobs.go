@@ -37,7 +37,7 @@ func fileSHA256(path string) (string, error) {
 // partition, and on Windows would have lost the dismount locks).
 func restoreJob(d disk.Info, imgPath string, onProgress func(int64), log func(string)) (disk.RawDevice, error) {
 	log(fmt.Sprintf("Unmounting %s...", d.Identifier))
-	if err := disk.Unmount(d.Identifier); err != nil {
+	if err := unmountCard(d.Identifier); err != nil {
 		return nil, fmt.Errorf("unmount: %w", err)
 	}
 
@@ -48,7 +48,7 @@ func restoreJob(d disk.Info, imgPath string, onProgress func(int64), log func(st
 	defer src.Close()
 
 	log(fmt.Sprintf("Writing %s to %s...", imgPath, d.Node()))
-	f, err := disk.OpenRaw(d, true)
+	f, err := openCard(d, true)
 	if err != nil {
 		return nil, fmt.Errorf("opening the card: %w", err)
 	}

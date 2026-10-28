@@ -90,13 +90,8 @@ func newBackupTab(w fyne.Window) fyne.CanvasObject {
 		status.SetText("Reading the card...")
 		go func() {
 			defer fyne.Do(func() { runBtn.Enable(); progress.Hide(); speedLabel.Hide() })
-			target := trimTarget(d, trimCheck.Checked, appendLog)
-			total := d.Size
-			if target > 0 {
-				total = target
-			}
-			st := newSpeedTracker(total, progress, speedLabel)
-			size, err := backupJob(d, outPath, target, st.onProgress, appendLog)
+			st := newSpeedTracker(d.Size, progress, speedLabel)
+			size, err := backupJob(d, outPath, trimCheck.Checked, st.retarget, st.onProgress, appendLog)
 			if err != nil {
 				fyne.Do(func() { status.SetText("Failed: " + err.Error()) })
 				return

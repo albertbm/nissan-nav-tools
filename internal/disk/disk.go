@@ -158,8 +158,13 @@ func ReadHeader(id Info) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
+	return ReadHeaderFromHandle(f)
+}
+
+// ReadHeaderFromHandle reads the leading partition-table bytes through an already-open handle.
+func ReadHeaderFromHandle(f RawDevice) ([]byte, error) {
 	data := make([]byte, 1024)
-	if _, err := io.ReadFull(f, data); err != nil {
+	if _, err := f.ReadAt(data, 0); err != nil {
 		return nil, fmt.Errorf("reading the partition table: %w", err)
 	}
 	return data, nil
@@ -171,7 +176,11 @@ func ReadRaw(id Info, outPath string, maxBytes int64, onProgress func(written in
 		return err
 	}
 	defer src.Close()
+	return ReadRawFromHandle(src, outPath, maxBytes, onProgress)
+}
 
+// ReadRawFromHandle copies maxBytes (or everything, if 0) from an already-open handle to outPath.
+func ReadRawFromHandle(src RawDevice, outPath string, maxBytes int64, onProgress func(written int64)) error {
 	out, err := os.Create(outPath)
 	if err != nil {
 		return err
@@ -228,7 +237,14 @@ func WriteRanges(id Info, ranges []Range) error {
 		return err
 	}
 	defer f.Close()
+	return WriteRangesToHandle(f, ranges)
+}
 
+// WriteRangesToHandle writes ranges through an already-open handle.
+func WriteRangesToHandle(f RawDevice, ranges []Range) error {
+	if err := checkRangesAligned(ranges); err != nil {
+		return err
+	}
 	for _, r := range ranges {
 		if _, err := f.WriteAt(r.Data, r.Offset); err != nil {
 			return fmt.Errorf("writing the card at 0x%x: %w", r.Offset, err)
@@ -250,7 +266,14 @@ func ReadRanges(id Info, ranges []Range) ([][]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
+	return ReadRangesFromHandle(f, ranges)
+}
 
+// ReadRangesFromHandle reads ranges back through an already-open handle.
+func ReadRangesFromHandle(f RawDevice, ranges []Range) ([][]byte, error) {
+	if err := checkRangesAligned(ranges); err != nil {
+		return nil, err
+	}
 	result := make([][]byte, len(ranges))
 	for i, r := range ranges {
 		buf := make([]byte, len(r.Data))

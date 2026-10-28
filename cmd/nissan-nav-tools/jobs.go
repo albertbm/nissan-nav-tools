@@ -112,11 +112,18 @@ func resetCopy(in, out string, log func(string)) error {
 	return nil
 }
 
-func trimTarget(d disk.Info, wantTrim bool, log func(string)) int64 {
+// openCard and unmountCard are the only points jobs.go touches a card through; tests
+// replace them with fakes so each job can be checked for how many times it opens.
+var (
+	openCard    = disk.OpenRaw
+	unmountCard = disk.Unmount
+)
+
+func trimTarget(f disk.RawDevice, d disk.Info, wantTrim bool, log func(string)) int64 {
 	if !wantTrim {
 		return 0
 	}
-	header, err := disk.ReadHeader(d)
+	header, err := disk.ReadHeaderFromHandle(f)
 	if err != nil {
 		log("Could not read the partition table, copying the whole card: " + err.Error())
 		return 0
@@ -132,10 +139,28 @@ func trimTarget(d disk.Info, wantTrim bool, log func(string)) int64 {
 	return size
 }
 
-func backupJob(d disk.Info, out string, target int64, onProgress func(int64), log func(string)) (int64, error) {
+// backupJob opens the card once: the same handle supplies the header used to
+// size the trim and the bytes that get copied out. onTarget, if not nil, is
+// told the real byte count as soon as it's known, so a progress bar sized
+// against the whole card up front can be rescaled to the trimmed total.
+func backupJob(d disk.Info, out string, wantTrim bool, onTarget func(int64), onProgress func(int64), log func(string)) (int64, error) {
 	log(fmt.Sprintf("Unmounting %s...", d.Identifier))
-	if err := disk.Unmount(d.Identifier); err != nil {
+	if err := unmountCard(d.Identifier); err != nil {
 		return 0, fmt.Errorf("unmount: %w", err)
+	}
+	f, err := openCard(d, false)
+	if err != nil {
+		return 0, fmt.Errorf("opening %s: %w", d.Node(), err)
+	}
+	defer f.Close()
+
+	target := trimTarget(f, d, wantTrim, log)
+	if onTarget != nil {
+		if target > 0 {
+			onTarget(target)
+		} else {
+			onTarget(d.Size)
+		}
 	}
 	if target > 0 {
 		log(fmt.Sprintf("Card is %s; trimming to %s, %s skipped",
@@ -144,7 +169,7 @@ func backupJob(d disk.Info, out string, target int64, onProgress func(int64), lo
 		log(fmt.Sprintf("Card is %s; copying all of it", humansize.Format(d.Size)))
 	}
 	log(fmt.Sprintf("Reading %s from %s...", d.Identifier, d.Node()))
-	if err := disk.ReadRaw(d, out, target, onProgress); err != nil {
+	if err := disk.ReadRawFromHandle(f, out, target, onProgress); err != nil {
 		return 0, fmt.Errorf("reading the card: %w", err)
 	}
 	fi, err := os.Stat(out)
@@ -258,7 +283,7 @@ func planCardPatch(r io.ReaderAt, limit int64, selected []int, log func(string))
 }
 
 func planCardPatchDevice(d disk.Info, selected []int, onProgress func(int64), log func(string)) ([]disk.Range, error) {
-	f, err := disk.OpenRaw(d, false)
+	f, err := openCard(d, false)
 	if err != nil {
 		return nil, err
 	}
@@ -284,21 +309,28 @@ func planCardPatchDevice(d disk.Info, selected []int, onProgress func(int64), lo
 }
 
 // Unmounts again right before writing: the card could have remounted while the confirmation dialog was up.
+// Opens once: the write and the read-back that verifies it share the same handle.
 func applyCardPatch(d disk.Info, ranges []disk.Range, log func(string)) error {
 	var total int64
 	for _, r := range ranges {
 		total += int64(len(r.Data))
 	}
 	log(fmt.Sprintf("Unmounting %s...", d.Identifier))
-	if err := disk.Unmount(d.Identifier); err != nil {
+	if err := unmountCard(d.Identifier); err != nil {
 		return fmt.Errorf("unmount: %w", err)
 	}
+	f, err := openCard(d, true)
+	if err != nil {
+		return fmt.Errorf("opening %s: %w", d.Node(), err)
+	}
+	defer f.Close()
+
 	log(fmt.Sprintf("Writing %d page range(s), %s, to %s...", len(ranges), humansize.Format(total), d.Node()))
-	if err := disk.WriteRanges(d, ranges); err != nil {
+	if err := disk.WriteRangesToHandle(f, ranges); err != nil {
 		return fmt.Errorf("writing the card: %w", err)
 	}
 	log("Reading the written ranges back...")
-	got, err := disk.ReadRanges(d, ranges)
+	got, err := disk.ReadRangesFromHandle(f, ranges)
 	if err != nil {
 		return fmt.Errorf("reading back: %w", err)
 	}

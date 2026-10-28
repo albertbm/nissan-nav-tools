@@ -27,6 +27,13 @@ func newSpeedTracker(total int64, bar *widget.ProgressBar, label *widget.Label) 
 	return &speedTracker{tr: progress.New(total), start: time.Now(), bar: bar, label: label, total: total}
 }
 
+// retarget resets the tracker's total once the real one is known, such as after a
+// backup's trim size comes back from the card instead of being guessed up front.
+func (s *speedTracker) retarget(total int64) {
+	s.total = total
+	s.tr = progress.New(total)
+}
+
 func (s *speedTracker) onProgress(done int64) {
 	st := s.tr.Update(done)
 	fyne.Do(func() {

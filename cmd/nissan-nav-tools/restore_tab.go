@@ -166,7 +166,7 @@ func newRestoreTab(w fyne.Window) fyne.CanvasObject {
 					return
 				}
 				fyne.Do(func() { status.SetText("Backing up first...") })
-				if _, err := backupJob(d, dest, 0, nil, appendLog); err != nil {
+				if _, err := backupJob(d, dest, false, nil, nil, appendLog); err != nil {
 					fyne.Do(func() { status.SetText("Failed: " + err.Error()) })
 					return
 				}
