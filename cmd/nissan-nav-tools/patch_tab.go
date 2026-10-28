@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -40,12 +41,14 @@ func patchTargetFor(label string) patchTarget {
 	}
 }
 
-func confirmInPlace(what string) (backupFirst, proceed bool) {
+// confirmInPlace shows the in-place warning shared by Patch and Factory reset; verb
+// names the action ("patch", "reset") for the dialog title and its Yes button.
+func confirmInPlace(what, verb string) (backupFirst, proceed bool) {
 	err := zenity.Question(
 		fmt.Sprintf("This writes straight to %s. There is no undo.\n\nOnly continue if you have a backup.", what),
-		zenity.Title("Patch in place"),
+		zenity.Title(strings.ToUpper(verb[:1])+verb[1:]+" in place"),
 		zenity.WarningIcon,
-		zenity.OKLabel("Yes, patch"),
+		zenity.OKLabel("Yes, "+verb),
 		zenity.ExtraButton("Back up first"),
 		zenity.CancelLabel("Cancel"),
 		zenity.DefaultCancel())
@@ -278,7 +281,7 @@ func runFilePatch(inPath string, detected appVersion, selected []int,
 	go func() {
 		defer fyne.Do(func() { runBtn.Enable(); spinner.Hide() })
 
-		backupFirst, proceed := confirmInPlace(inPath)
+		backupFirst, proceed := confirmInPlace(inPath, "patch")
 		if !proceed {
 			fyne.Do(func() { status.SetText("Cancelled; nothing written.") })
 			return
@@ -316,7 +319,7 @@ func runCardPatch(d disk.Info, selected []int,
 		return
 	}
 
-	backupFirst, proceed := confirmInPlace(d.Identifier)
+	backupFirst, proceed := confirmInPlace(d.Identifier, "patch")
 	if !proceed {
 		status.SetText("Cancelled; nothing written.")
 		return

@@ -77,13 +77,40 @@ func defaultOutput(in, suffix string) string {
 	return in + suffix + ext
 }
 
+func printResetReport(label string, rep anonymize.Report) {
+	fmt.Printf("reset %s\n", label)
+	fmt.Printf("%d exFAT partition(s) walked, %d item(s) zeroed, %s total\n",
+		rep.CWSPartitions, len(rep.Items), humansize.Format(rep.BytesZeroed()))
+	for _, it := range rep.Items {
+		fmt.Printf("  %-55s %-45s %8s\n", it.Path, it.What, humansize.Format(it.Size))
+	}
+	if rep.CWSPartitions > 0 {
+		fmt.Printf("  %-55s %-45s %8s (%d cluster(s))\n",
+			"<free space on the CWS partition(s)>", "old deleted/rewritten file residue",
+			humansize.Format(rep.FreeBytesZeroed), rep.FreeClusters)
+	}
+	if rep.FrontGapFound {
+		fmt.Printf("  %-55s %-45s %8s (%d markers seen)\n",
+			"<front gap settings area>", "unit-written state, layout undecoded",
+			humansize.Format(rep.FrontGapSize), rep.FrontGapRecords)
+	} else {
+		fmt.Println("  front gap not present (image too small) - nothing zeroed there")
+	}
+}
+
 func runResetCLI(args []string) int {
 	fs := flag.NewFlagSet("reset", flag.ExitOnError)
-	in := fs.String("in", "", "card image to reset (required)")
+	in := fs.String("in", "", "card image to reset (required unless -disk)")
 	out := fs.String("out", "", "output image (default: <in>.reset<ext>)")
 	force := fs.Bool("force", false, "replace -out if it already exists")
 	inPlace := fs.Bool("in-place", false, "write to -in directly instead of a copy")
+	diskID := fs.String("disk", "", "disk identifier to reset directly, e.g. disk4")
+	yes := fs.Bool("yes", false, "skip the typed confirmation with -disk")
 	fs.Parse(args)
+
+	if *diskID != "" {
+		return runResetDiskCLI(*diskID, *yes)
+	}
 
 	if *in == "" {
 		fmt.Fprintln(os.Stderr, "reset: -in is required")
@@ -121,24 +148,49 @@ func runResetCLI(args []string) int {
 	}
 	done = true
 
-	fmt.Printf("reset %s\n", target)
-	fmt.Printf("%d exFAT partition(s) walked, %d item(s) zeroed, %s total\n",
-		rep.CWSPartitions, len(rep.Items), humansize.Format(rep.BytesZeroed()))
-	for _, it := range rep.Items {
-		fmt.Printf("  %-55s %-45s %8s\n", it.Path, it.What, humansize.Format(it.Size))
+	printResetReport(target, rep)
+	return 0
+}
+
+func runResetDiskCLI(diskID string, yes bool) int {
+	disks, err := disk.List()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "reset: %v\n", err)
+		return 1
 	}
-	if rep.CWSPartitions > 0 {
-		fmt.Printf("  %-55s %-45s %8s (%d cluster(s))\n",
-			"<free space on the CWS partition(s)>", "old deleted/rewritten file residue",
-			humansize.Format(rep.FreeBytesZeroed), rep.FreeClusters)
+	var d disk.Info
+	found := false
+	for _, c := range disks {
+		if c.Identifier == diskID {
+			d, found = c, true
+			break
+		}
 	}
-	if rep.FrontGapFound {
-		fmt.Printf("  %-55s %-45s %8s (%d markers seen)\n",
-			"<front gap settings area>", "unit-written state, layout undecoded",
-			humansize.Format(rep.FrontGapSize), rep.FrontGapRecords)
-	} else {
-		fmt.Println("  front gap not present (image too small) - nothing zeroed there")
+	if !found {
+		fmt.Fprintf(os.Stderr, "reset: %s is not an external, removable disk, or isn't attached\n", diskID)
+		return 1
 	}
+	if err := refuseUnlessCard(d); err != nil {
+		fmt.Fprintf(os.Stderr, "reset: %v\n", err)
+		return 1
+	}
+
+	if !yes {
+		fmt.Printf("This writes straight to %s. There is no undo.\n", d.Identifier)
+		fmt.Printf("Type %s to continue: ", d.Identifier)
+		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+		if strings.TrimSpace(line) != d.Identifier {
+			fmt.Fprintln(os.Stderr, "reset: confirmation didn't match, nothing written")
+			return 1
+		}
+	}
+
+	rep, err := resetCardInPlace(d, func(s string) { fmt.Println(s) })
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "reset: %v\n", err)
+		return 1
+	}
+	printResetReport(d.Identifier, rep)
 	return 0
 }
 

@@ -99,6 +99,47 @@ func Reset(f ReadWriterAt, size int64) (Report, error) {
 	return rep, nil
 }
 
+// Window is a byte range Reset may write: a CWS exFAT partition's full extent, or the front gap.
+type Window struct {
+	Offset int64
+	Size   int64
+}
+
+// Bounds reports every window Reset is allowed to write. A caller writing straight to a
+// card, rather than through Reset's own ReadWriterAt, can refuse anything outside them.
+func Bounds(f io.ReaderAt, size int64) ([]Window, error) {
+	sector1 := make([]byte, 512)
+	if _, err := f.ReadAt(sector1, 512); err != nil {
+		return nil, fmt.Errorf("reading sector 1: %w", err)
+	}
+	if sector1[510] != 0x55 || sector1[511] != 0xAA || !bytes.HasPrefix(sector1, []byte("CLARION ID")) {
+		return nil, fmt.Errorf("no Clarion signature in sector 1, refusing to touch this image")
+	}
+	parts, err := readPartitionTable(sector1)
+	if err != nil {
+		return nil, err
+	}
+
+	var out []Window
+	for _, p := range parts {
+		boot := make([]byte, 512)
+		if _, err := f.ReadAt(boot, p.lba*512); err != nil {
+			continue
+		}
+		if string(boot[3:11]) != "EXFAT   " {
+			continue
+		}
+		out = append(out, Window{Offset: p.lba * 512, Size: p.count * 512})
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no exFAT partition found")
+	}
+	if size >= frontGapOffset+frontGapSize {
+		out = append(out, Window{Offset: frontGapOffset, Size: frontGapSize})
+	}
+	return out, nil
+}
+
 type partEntry struct {
 	ptype byte
 	lba   int64

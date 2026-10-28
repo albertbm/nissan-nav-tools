@@ -36,6 +36,12 @@ func (b *BufferedReaderAt) block(start int64) ([]byte, error) {
 	return buf, nil
 }
 
+// invalidate drops every cached block; call it after a write so a later read can't return stale data.
+func (b *BufferedReaderAt) invalidate() {
+	b.cache = make(map[int64][]byte)
+	b.order = nil
+}
+
 func (b *BufferedReaderAt) ReadAt(p []byte, off int64) (int, error) {
 	total := 0
 	for total < len(p) {

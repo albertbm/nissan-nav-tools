@@ -92,23 +92,7 @@ func resetCopy(in, out string, log func(string)) error {
 	if err != nil {
 		return fmt.Errorf("reset: %w", err)
 	}
-	log(fmt.Sprintf("%d exFAT partition(s) walked, %d item(s) zeroed, %s total",
-		rep.CWSPartitions, len(rep.Items), humansize.Format(rep.BytesZeroed())))
-	for _, it := range rep.Items {
-		log(fmt.Sprintf("  %-45s %-40s %8s", it.Path, it.What, humansize.Format(it.Size)))
-	}
-	if rep.CWSPartitions > 0 {
-		log(fmt.Sprintf("  %-45s %-40s %8s (%d cluster(s))",
-			"<free space on the CWS partition(s)>", "old deleted/rewritten file residue",
-			humansize.Format(rep.FreeBytesZeroed), rep.FreeClusters))
-	}
-	if rep.FrontGapFound {
-		log(fmt.Sprintf("  %-45s %-40s %8s (%d markers seen)",
-			"<front gap settings area>", "unit-written state, layout undecoded",
-			humansize.Format(rep.FrontGapSize), rep.FrontGapRecords))
-	} else {
-		log("  front gap not present (image too small) - nothing zeroed there")
-	}
+	logResetReport(rep, log)
 	return nil
 }
 
