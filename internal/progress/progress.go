@@ -7,10 +7,11 @@ import (
 	"time"
 )
 
-const settleWindow = 2 * time.Second
+// Blank for the first few seconds: too little data yet for an honest number.
+const settleWindow = 3 * time.Second
 
-// Cards write in bursts; average the last 30 s.
-const rateWindow = 30 * time.Second
+// The displayed line changes no more than once per tick, so bursty callbacks can't make it flicker.
+const tickInterval = time.Second
 
 type Stats struct {
 	Done     int64
@@ -22,20 +23,15 @@ type Stats struct {
 	HasETA   bool
 }
 
-type sample struct {
-	at   time.Time
-	done int64
-}
-
 type Tracker struct {
-	total   int64
-	start   time.Time
-	samples []sample
+	total    int64
+	start    time.Time
+	lastTick time.Time
+	cached   Stats
 }
 
 func New(total int64) *Tracker {
-	now := time.Now()
-	return &Tracker{total: total, start: now, samples: []sample{{now, 0}}}
+	return &Tracker{total: total, start: time.Now()}
 }
 
 func (t *Tracker) Update(done int64) Stats {
@@ -43,20 +39,21 @@ func (t *Tracker) Update(done int64) Stats {
 }
 
 func (t *Tracker) at(done int64, now time.Time) Stats {
-	if last := t.samples[len(t.samples)-1]; now.Sub(last.at) >= 250*time.Millisecond {
-		t.samples = append(t.samples, sample{now, done})
+	if t.lastTick.IsZero() || now.Sub(t.lastTick) >= tickInterval {
+		t.lastTick = now
+		t.cached = t.compute(done, now)
 	}
-	for len(t.samples) > 2 && now.Sub(t.samples[1].at) >= rateWindow {
-		t.samples = t.samples[1:]
-	}
+	return t.cached
+}
+
+// compute is the whole-run average: total bytes over total elapsed time.
+func (t *Tracker) compute(done int64, now time.Time) Stats {
 	elapsed := now.Sub(t.start)
 	st := Stats{Done: done, Total: t.total, Elapsed: elapsed}
-	first := t.samples[0]
-	dt := now.Sub(first.at).Seconds()
-	if elapsed < settleWindow || dt <= 0 {
+	if elapsed < settleWindow {
 		return st
 	}
-	rate := float64(done-first.done) / dt
+	rate := float64(done) / elapsed.Seconds()
 	if rate <= 0 {
 		return st
 	}
@@ -92,6 +89,17 @@ func FormatDuration(d time.Duration) string {
 	return fmt.Sprintf("%d min %d s", m, s)
 }
 
+// roundETA holds the countdown still: exact under a minute, to the nearest 10 s beyond it.
+func roundETA(d time.Duration) time.Duration {
+	if d < 0 {
+		d = 0
+	}
+	if d < time.Minute {
+		return d.Round(time.Second)
+	}
+	return d.Round(10 * time.Second)
+}
+
 func (s Stats) Line() string {
 	pct := "-"
 	if s.Total > 0 {
@@ -102,7 +110,7 @@ func (s Stats) Line() string {
 	}
 	eta := "-"
 	if s.HasETA {
-		eta = FormatDuration(s.ETA) + " left"
+		eta = FormatDuration(roundETA(s.ETA)) + " left"
 	}
 	return fmt.Sprintf("%s · %s · %s", pct, FormatSpeed(s.Speed), eta)
 }
