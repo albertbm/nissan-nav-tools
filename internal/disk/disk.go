@@ -185,15 +185,6 @@ func ReadRaw(id Info, outPath string, maxBytes int64, onProgress func(written in
 	return copyChunks(out, r, onProgress, false)
 }
 
-func HashRaw(id Info, n int64, onProgress func(written int64)) (string, error) {
-	src, err := OpenRaw(id, false)
-	if err != nil {
-		return "", err
-	}
-	defer src.Close()
-	return hashStream(src, n, onProgress)
-}
-
 func hashStream(r io.Reader, n int64, onProgress func(written int64)) (string, error) {
 	h := sha256.New()
 	if err := copyChunks(h, io.LimitReader(r, n), onProgress, false); err != nil {
@@ -202,20 +193,17 @@ func hashStream(r io.Reader, n int64, onProgress func(written int64)) (string, e
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func WriteRaw(id Info, srcPath string, onProgress func(written int64)) error {
-	src, err := os.Open(srcPath)
-	if err != nil {
-		return err
-	}
-	defer src.Close()
-
-	dst, err := OpenRaw(id, true)
-	if err != nil {
-		return err
-	}
-	defer dst.Close()
-
+// WriteToHandle writes src to an already-open handle; the caller owns opening and closing it.
+func WriteToHandle(dst RawDevice, src io.Reader, onProgress func(written int64)) error {
 	return copyChunks(dst, src, onProgress, true)
+}
+
+// HashHandle reads the first n bytes back through dst's ReaderAt and hashes them.
+// Reading through the same handle that did the write, before it's closed, means a
+// remount's writes to the new partition table (or a page cache getting invalidated
+// only on close) never reach this read-back.
+func HashHandle(dst RawDevice, n int64, onProgress func(written int64)) (string, error) {
+	return hashStream(io.NewSectionReader(dst, 0, n), n, onProgress)
 }
 
 func checkRangesAligned(ranges []Range) error {

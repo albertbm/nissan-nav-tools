@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -116,6 +118,60 @@ func TestCheckStillThereRejectsAVanishedDisk(t *testing.T) {
 	if err := checkStillThere(picked, nil); err == nil {
 		t.Fatal("accepted a write with the disk no longer attached")
 	}
+}
+
+// A file standing in for the card: WriteToHandle/HashHandle must verify through
+// the handle that did the write, not through a fresh open, since on a real card a
+// remount can mutate the disk right after that handle closes.
+func TestHashHandleVerifiesBeforeAnyPostCloseMutation(t *testing.T) {
+	data := bytes.Repeat([]byte("NISSANCARD"), sectorBytes) // 5120 bytes, an exact multiple of sectorBytes
+	wantHash := hex.EncodeToString(sha256Sum(data))
+
+	path := filepath.Join(t.TempDir(), "card.img")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteToHandle(f, bytes.NewReader(data), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// verify through the same still-open handle, as restoreJob/verifyRestore now do
+	gotHash, err := HashHandle(f, int64(len(data)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// the "remount" hook: something rewrites the card only after the handle closes
+	if err := os.WriteFile(path, bytes.Repeat([]byte{0xff}, 16), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if gotHash != wantHash {
+		t.Fatalf("verify through the open handle got %s, want %s; it must not see what happens after close", gotHash, wantHash)
+	}
+
+	// prove the mutation really would have broken a verify that reopened the file instead
+	reopened, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	afterHash, _ := hashStream(reopened, int64(len(data)), nil)
+	if afterHash == wantHash {
+		t.Fatal("the remount hook left the on-disk bytes unchanged; this test proves nothing")
+	}
+}
+
+func sha256Sum(data []byte) []byte {
+	h := sha256.Sum256(data)
+	return h[:]
 }
 
 func TestCheckStillThereRejectsADifferentCardOnTheSameIdentifier(t *testing.T) {

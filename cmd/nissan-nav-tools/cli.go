@@ -253,10 +253,13 @@ func runRestoreCLI(args []string) int {
 	}
 
 	log := func(s string) { fmt.Println(s) }
+	var card disk.RawDevice
 	err = restoreSequence(
 		func() error {
 			start := time.Now()
-			if err := restoreJob(d, *in, cliProgress(fi.Size()), log); err != nil {
+			var err error
+			card, err = restoreJob(d, *in, cliProgress(fi.Size()), log)
+			if err != nil {
 				return err
 			}
 			cliProgressDone(start, fi.Size())
@@ -264,7 +267,7 @@ func runRestoreCLI(args []string) int {
 		},
 		func() error {
 			start := time.Now()
-			if err := verifyRestore(d, *in, cliProgress(fi.Size()), log); err != nil {
+			if err := verifyRestore(card, *in, cliProgress(fi.Size()), log); err != nil {
 				return err
 			}
 			cliProgressDone(start, fi.Size())
@@ -272,6 +275,9 @@ func runRestoreCLI(args []string) int {
 		},
 		*verify,
 	)
+	if card != nil {
+		card.Close()
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "restore: %v\n", err)
 		return 1
